@@ -305,7 +305,7 @@
         </div>
 
 
-        <div id="simple-calculator-container" class="hidden flex items-center justify-center antialiased">
+        <div id="simple-calculator-container" class="hidden flex items-center justify-center antialiased flex-col">
             <div class="bg-white dark:bg-gray-800 w-full max-w-md p-6 rounded-3xl shadow-lg space-y-4">
                 <div class="bg-gray-200 dark:bg-gray-900 p-4 rounded-xl shadow-inner">
                     <div id="calc-history" class="text-right text-lg font-mono font-medium text-gray-500 dark:text-gray-400 mb-2 overflow-x-auto whitespace-nowrap min-h-[1.75rem]" aria-label="計算式（編集可）"></div>
@@ -338,8 +338,10 @@
                     <div></div><div></div><div></div>
                     <button id="equal-btn" class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-white bg-emerald-500 hover:bg-emerald-400">＝</button>
                 </div>
+                <p class="text-center text-xs text-gray-500 dark:text-gray-400 mt-3 select-none">※テンキーの「.」で「:」を入力できます</p>
             </div>
         </div>
+
 
         <div id="shaku-calculator-container" class="hidden">
             <div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg mb-8">
@@ -371,16 +373,12 @@
                 </div>
             </div>
         </div>
-        
-        <footer class="mt-auto pt-12 pb-6 flex justify-center opacity-80 hover:opacity-100 transition-opacity">
-           <img src="https://i.imgur.com/5rKpGlp.png" alt="Company Logo" style="width: 120px; display: block;">
-        </footer>
 
     </div>
 
     <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // --- タブ要素 ---
+        // --- 汎用要素の取得 ---
         const tabs = {
             bitrate: document.getElementById('mode-bitrate'),
             filesize: document.getElementById('mode-filesize'),
@@ -390,7 +388,6 @@
             shaku: document.getElementById('mode-shaku')
         };
 
-        // --- コンテナ要素 ---
         const containers = {
             bitrate: document.getElementById('bitrate-container'),
             filesize: document.getElementById('filesize-container'),
@@ -431,7 +428,7 @@
         tabs.simple.addEventListener('click', () => switchMode('simple'));
         tabs.shaku.addEventListener('click', () => switchMode('shaku'));
 
-        // --- 初期化 ---
+        // --- 各機能の初期化 ---
         setupBitrateOnlyCalculator();
         setupFileSizeOnlyCalculator();
         setupAspectRatioCalculator();
@@ -439,7 +436,7 @@
         setupSimpleCalculator();
         setupShakuCalculator();
 
-        // デフォルトモード
+        // --- デフォルトモード ---
         switchMode('bitrate');
     });
 
@@ -671,67 +668,443 @@
     }
 
     // =======================================================
-    // ▼▼▼ 5. 電卓モード ▼▼▼
+    // ▼▼▼ 5. 電卓モード (テンキー対応 & Deleteキー対応) ▼▼▼
     // =======================================================
     function setupSimpleCalculator() {
-        const display=document.getElementById('calc-display'), history=document.getElementById('calc-history'), editToggle=document.getElementById('edit-toggle'), editCancel=document.getElementById('edit-cancel'), editError=document.getElementById('edit-error'), simpleContainer=document.getElementById('simple-calculator-container');
-        const TOKEN_REGEX=/^\d{1,3}(:\d{1,2}){0,2}$/; let currentInput='', currentExpression='', justCalculated=false, editing=false, exprBackup='';
-        function padToken(t){ const p=t.split(':').map(v=>v||'0'); if(p.length===1)return String(Number(p[0])); if(p.length===2)return `${Number(p[0])}:${String(Number(p[1])).padStart(2,'0')}`; if(p.length===3)return `${Number(p[0])}:${String(Number(p[1])).padStart(2,'0')}:${String(Number(p[2])).padStart(2,'0')}`; return t; }
-        function toSec(s){ const p=s.split(':').map(n=>Number(n||0)); let h=0,m=0,sc=0; if(p.length===3)[h,m,sc]=p; else if(p.length===2)[m,sc]=p; else [sc]=p; return h*3600+m*60+sc; }
-        function toTime(s){ const sg=s<0?'-':''; s=Math.abs(s); const h=String(Math.floor(s/3600)).padStart(2,'0'), m=String(Math.floor((s%3600)/60)).padStart(2,'0'), sc=String(s%60).padStart(2,'0'); return `${sg}${h}:${m}:${sc}`; }
-        function normalize(s){ return s.replace(/[＋﹢]/g,'+').replace(/[－﹣–—−]/g,'-').replace(/[：∶︰]/g,':').replace(/　/g,' ').replace(/([+\-])/g,' $1 ').replace(/\s+/g,' ').trim().split(' ').map(t=>(TOKEN_REGEX.test(t)?padToken(t):t)).join(' '); }
-        function validateToken(t){ if(!TOKEN_REGEX.test(t))return{ok:false,msg:`書式不正`}; const p=t.split(':').map(n=>Number(n||0)); if(p.length===2&&p[1]>59)return{ok:false,msg:`秒不正`}; if(p.length===3){if(p[1]>59)return{ok:false,msg:`分不正`};if(p[2]>59)return{ok:false,msg:`秒不正`};} return{ok:true}; }
-        function validateExpr(s){ const n=normalize(s); if(!n)return{ok:true,norm:'',msg:''}; const ts=n.split(' '); if(ts.length%2===0)return{ok:false,norm:n,msg:'演算子末尾'}; for(let i=0;i<ts.length;i++){ if(i%2===0){const v=validateToken(ts[i]);if(!v.ok)return{ok:false,norm:n,msg:v.msg};} else if(!['+','-'].includes(ts[i]))return{ok:false,norm:n,msg:'演算子エラー'}; } return{ok:true,norm:n}; }
-        function compute(s){ const ts=s.trim().split(/\s+/); let tot=toSec(ts[0]||'0'); for(let i=1;i<ts.length;i+=2){ const op=ts[i],v=toSec(ts[i+1]||'0'); if(op==='+')tot+=v; if(op==='-')tot-=v; } return tot; }
-        function update(){ display.textContent=currentInput||'00:00:00'; history.textContent=currentExpression; }
-        function addNum(n){ if(editing)return; editError.textContent=''; if(justCalculated){currentInput='';currentExpression='';justCalculated=false;} const nx=currentInput+n; if(!/^\d{0,3}(:\d{0,2}){0,2}$/.test(nx)){editError.textContent='桁数上限';return;} currentInput=nx; update(); }
-        function addCol(){ if(editing)return; editError.textContent=''; const c=(currentInput.match(/:/g)||[]).length; if(c<2){ if(currentInput===''&&c===0)currentInput='0:'; else currentInput+=':'; update(); } }
-        function addOp(op){ if(editing)return; if(justCalculated&&!currentInput){currentExpression=display.textContent+' '+op+' ';justCalculated=false;update();return;} if(!currentInput)return; const v=validateToken(currentInput); if(!v.ok){editError.textContent=v.msg;return;} editError.textContent=''; currentExpression+=padToken(currentInput)+' '+op+' '; currentInput=''; update(); }
-        function calc(){ if(editing)return applyEdit(); if(currentInput){const v=validateToken(currentInput);if(!v.ok){editError.textContent=v.msg;return;}} let ex=currentExpression; if(currentInput)ex+=padToken(currentInput); ex=normalize(ex); if(!ex)return; const v=validateExpr(ex); if(!v.ok){editError.textContent=v.msg;return;} const tot=compute(v.norm); const rs=toTime(tot); history.textContent=v.norm+' = '+rs; display.textContent=rs; currentExpression=v.norm+' '; currentInput=''; justCalculated=true; editError.textContent=''; }
-        function clear(){ if(editing)cancelEdit(); currentInput=''; currentExpression=''; justCalculated=false; editError.textContent=''; update(); }
-        function back(){ if(editing)return; editError.textContent=''; if(currentInput){currentInput=currentInput.slice(0,-1);update();} }
-        function setEdit(on){ editing=on; if(on){ exprBackup=history.textContent; history.contentEditable=true; history.classList.add('bg-white','dark:bg-gray-700','border','border-blue-400','rounded','px-2','py-1'); history.focus(); editToggle.textContent='適用'; editToggle.classList.replace('bg-blue-200','bg-green-200'); editToggle.classList.replace('text-blue-800','text-green-800'); editToggle.classList.replace('dark:bg-blue-900/50','dark:bg-green-900/50'); editToggle.classList.replace('dark:text-blue-300','dark:text-green-300'); editCancel.classList.remove('hidden'); editError.textContent=''; } else { history.contentEditable=false; history.classList.remove('bg-white','dark:bg-gray-700','border','border-blue-400','rounded','px-2','py-1'); editToggle.textContent='編集'; editToggle.classList.replace('bg-green-200','bg-blue-200'); editToggle.classList.replace('text-green-800','text-blue-800'); editToggle.classList.replace('dark:bg-green-900/50','dark:bg-blue-900/50'); editToggle.classList.replace('dark:text-green-300','dark:text-blue-300'); editCancel.classList.add('hidden'); } }
-        function applyEdit(){ const r=history.textContent; let ep=r; if(r.includes('='))ep=r.split('=')[0]; const v=validateExpr(ep); if(!v.ok){editError.textContent=v.msg;return;} currentExpression=v.norm+' '; currentInput=''; justCalculated=false; setEdit(false); calc(); }
-        function cancelEdit(){ history.textContent=exprBackup; setEdit(false); editError.textContent=''; }
+        const display = document.getElementById('calc-display');
+        const history = document.getElementById('calc-history');
+        const editToggle = document.getElementById('edit-toggle');
+        const editCancel = document.getElementById('edit-cancel');
+        const editError  = document.getElementById('edit-error');
+        const simpleContainer = document.getElementById('simple-calculator-container');
+
+        const TIME_TOKEN_REGEX = /^\d{1,3}(:\d{1,2}){0,2}$/;
+        let currentInput = '';
+        let currentExpression = '';
+        let justCalculated = false;
+        let editing = false;
+        let exprBackup = '';
+
+        function padTimeToken(token) {
+            const parts = token.split(':').map(p => p || '0');
+            if (parts.length === 1) return String(Number(parts[0]));
+            if (parts.length === 2) return `${String(Number(parts[0]))}:${String(Number(parts[1])).padStart(2, '0')}`;
+            if (parts.length === 3) return `${String(Number(parts[0]))}:${String(Number(parts[1])).padStart(2, '0')}:${String(Number(parts[2])).padStart(2, '0')}`;
+            return token;
+        }
         
-        document.querySelectorAll('#simple-calculator-container [data-num]').forEach(b=>b.addEventListener('click',()=>addNum(b.dataset.num)));
-        document.getElementById('colon-btn').addEventListener('click',addCol);
-        document.querySelectorAll('#simple-calculator-container [data-op]').forEach(b=>b.addEventListener('click',()=>addOp(b.dataset.op)));
-        document.getElementById('equal-btn').addEventListener('click',calc); document.getElementById('clear-btn').addEventListener('click',clear); document.getElementById('backspace-btn').addEventListener('click',back);
-        editToggle.addEventListener('click',()=>{if(!editing){history.textContent=currentExpression.trim();setEdit(true);}else applyEdit();}); editCancel.addEventListener('click',cancelEdit);
-        history.addEventListener('keydown',e=>{if(!editing)return;if(e.key==='Enter'){e.preventDefault();applyEdit();}if(e.key==='Escape'){e.preventDefault();cancelEdit();}});
-        document.addEventListener('keydown',e=>{ if(simpleContainer.classList.contains('hidden'))return; if(e.target.closest('input, textarea, [contenteditable="true"]'))return; if(editing)return; if(e.key>='0'&&e.key<='9'){addNum(e.key);e.preventDefault();} else if(e.key===':'||e.key===';'){addCol();e.preventDefault();} else if(e.key==='+'){addOp('+');e.preventDefault();} else if(e.key==='-'){addOp('-');e.preventDefault();} else if(e.key==='Enter'||e.key==='='){calc();e.preventDefault();} else if(e.key==='Backspace'){back();e.preventDefault();} else if(e.key==='Escape'||e.key.toLowerCase()==='c'){clear();e.preventDefault();} });
-        update();
+        function timeToSeconds(timeStr) {
+            const parts = timeStr.split(':').map(n => Number(n || 0));
+            let h = 0, m = 0, s = 0;
+            if (parts.length === 3) [h, m, s] = parts;
+            else if (parts.length === 2) [m, s] = parts;
+            else if (parts.length === 1) [s] = parts;
+            return h * 3600 + m * 60 + s;
+        }
+
+        function secondsToTime(sec) {
+            const sign = sec < 0 ? '-' : '';
+            sec = Math.abs(sec);
+            const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+            const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+            const s = String(sec % 60).padStart(2, '0');
+            return `${sign}${h}:${m}:${s}`;
+        }
+
+        function normalizeExpression(str) {
+            return str.replace(/[＋﹢]/g, '+').replace(/[－﹣–—−]/g, '-').replace(/[：∶︰]/g, ':').replace(/　/g, ' ').replace(/([+\-])/g, ' $1 ').replace(/\s+/g, ' ').trim().split(' ').map(tok => (isTimeToken(tok) ? padTimeToken(tok) : tok)).join(' ');
+        }
+
+        function isTimeToken(tok) { return TIME_TOKEN_REGEX.test(tok); }
+
+        function validateTimeToken(token) {
+            if (!TIME_TOKEN_REGEX.test(token)) return { ok: false, msg: `時間の書式が不正です: "${token}"` };
+            const parts = token.split(':').map(p => Number(p || 0));
+            if (parts.length === 2 && parts[1] > 59) return { ok: false, msg: `秒の値が不正です (0-59): "${token}"` };
+            if (parts.length === 3) {
+                if (parts[1] > 59) return { ok: false, msg: `分の値が不正です (0-59): "${token}"` };
+                if (parts[2] > 59) return { ok: false, msg: `秒の値が不正です (0-59): "${token}"` };
+            }
+            return { ok: true, msg: '' };
+        }
+
+        function validateExpression(str) {
+            const norm = normalizeExpression(str);
+            if (norm === '') return { ok: true, normalized: '', msg: '' };
+            const tokens = norm.split(' ');
+            if (tokens.length % 2 === 0) return { ok: false, normalized: norm, msg: '式の最後が演算子です。' };
+            for (let i = 0; i < tokens.length; i++) {
+                if (i % 2 === 0) {
+                    const tokenValidation = validateTimeToken(tokens[i]);
+                    if (!tokenValidation.ok) return { ok: false, normalized: norm, msg: tokenValidation.msg };
+                } else if (!(tokens[i] === '+' || tokens[i] === '-')) {
+                    return { ok: false, normalized: norm, msg: `演算子は + と - のみです。` };
+                }
+            }
+            return { ok: true, normalized: norm, msg: '' };
+        }
+
+        function computeFromExpression(exprStr) {
+            const tokens = exprStr.trim().split(/\s+/);
+            let total = timeToSeconds(tokens[0] || '0');
+            for (let i = 1; i < tokens.length; i += 2) {
+                const op = tokens[i], val = timeToSeconds(tokens[i + 1] || '0');
+                if (op === '+') total += val;
+                if (op === '-') total -= val;
+            }
+            return total;
+        }
+
+        function updateDisplay() {
+            display.textContent = currentInput || '00:00:00';
+            history.textContent = currentExpression;
+        }
+
+        function appendNumber(num) {
+            if (editing) return;
+            editError.textContent = '';
+            if (justCalculated) { currentInput = ''; currentExpression = ''; justCalculated = false; }
+            const next = currentInput + num;
+            if (!/^\d{0,3}(:\d{0,2}){0,2}$/.test(next)) {
+                editError.textContent = '桁数が上限です（H:3桁, M/S:2桁）';
+                return;
+            }
+            currentInput = next;
+            updateDisplay();
+        }
+
+        function appendColon() {
+            if (editing) return;
+            editError.textContent = '';
+            const count = (currentInput.match(/:/g) || []).length;
+            if (count < 2) {
+                if (currentInput === '' && count === 0) currentInput = '0:';
+                else currentInput += ':';
+                updateDisplay();
+            }
+        }
+
+        function appendOperator(op) {
+            if (editing) return;
+            if (justCalculated && !currentInput) {
+                currentExpression = display.textContent + ' ' + op + ' ';
+                justCalculated = false;
+                updateDisplay();
+                return;
+            }
+            if (!currentInput) return;
+            const validation = validateTimeToken(currentInput);
+            if (!validation.ok) { editError.textContent = validation.msg; return; }
+            editError.textContent = '';
+            currentExpression += padTimeToken(currentInput) + ' ' + op + ' ';
+            currentInput = '';
+            updateDisplay();
+        }
+
+        function calculateResult() {
+            if (editing) return tryApplyEdit();
+            if (currentInput) {
+                const validation = validateTimeToken(currentInput);
+                if (!validation.ok) { editError.textContent = validation.msg; return; }
+            }
+            let expr = currentExpression;
+            if (currentInput) expr += padTimeToken(currentInput);
+            expr = normalizeExpression(expr);
+            if (!expr) return;
+            const v = validateExpression(expr);
+            if (!v.ok) { editError.textContent = v.msg; return; }
+            const total = computeFromExpression(v.normalized);
+            const resultStr = secondsToTime(total);
+            history.textContent = v.normalized + ' = ' + resultStr;
+            display.textContent = resultStr;
+            currentExpression = v.normalized + ' ';
+            currentInput = '';
+            justCalculated = true;
+            editError.textContent = '';
+        }
+
+        function clearAll() {
+            if (editing) cancelEdit();
+            currentInput = ''; currentExpression = ''; justCalculated = false;
+            editError.textContent = ''; updateDisplay();
+        }
+
+        function backspaceOne() {
+            if (editing) return;
+            editError.textContent = '';
+            if (currentInput) { currentInput = currentInput.slice(0, -1); updateDisplay(); }
+        }
+
+        function setEditing(on) {
+            editing = on;
+            if (on) {
+                exprBackup = history.textContent;
+                history.contentEditable = true;
+                history.classList.add('bg-white', 'dark:bg-gray-700', 'border', 'border-blue-400', 'rounded', 'px-2', 'py-1');
+                history.focus();
+                editToggle.textContent = '適用';
+                editToggle.classList.replace('bg-blue-200', 'bg-green-200');
+                editToggle.classList.replace('text-blue-800', 'text-green-800');
+                editToggle.classList.replace('dark:bg-blue-900/50', 'dark:bg-green-900/50');
+                editToggle.classList.replace('dark:text-blue-300', 'dark:text-green-300');
+                editCancel.classList.remove('hidden');
+                editError.textContent = '';
+            } else {
+                history.contentEditable = false;
+                history.classList.remove('bg-white', 'dark:bg-gray-700', 'border', 'border-blue-400', 'rounded', 'px-2', 'py-1');
+                editToggle.textContent = '編集';
+                editToggle.classList.replace('bg-green-200', 'bg-blue-200');
+                editToggle.classList.replace('text-green-800', 'text-blue-800');
+                editToggle.classList.replace('dark:bg-green-900/50', 'dark:bg-blue-900/50');
+                editToggle.classList.replace('dark:text-green-300', 'dark:text-blue-300');
+                editCancel.classList.add('hidden');
+            }
+        }
+
+        function tryApplyEdit() {
+            const raw = history.textContent;
+            let exprPart = raw;
+            if (raw.includes('=')) {
+                exprPart = raw.split('=')[0];
+            }
+            const v = validateExpression(exprPart);
+            if (!v.ok) {
+                editError.textContent = v.msg;
+                return;
+            }
+            currentExpression = v.normalized + ' ';
+            currentInput = '';
+            justCalculated = false; 
+            setEditing(false);
+            calculateResult();
+        }
+
+        function cancelEdit() {
+            history.textContent = exprBackup;
+            setEditing(false);
+            editError.textContent = '';
+        }
+
+        document.querySelectorAll('#simple-calculator-container [data-num]').forEach(btn => btn.addEventListener('click', () => appendNumber(btn.dataset.num)));
+        document.getElementById('colon-btn').addEventListener('click', appendColon);
+        document.querySelectorAll('#simple-calculator-container [data-op]').forEach(btn => btn.addEventListener('click', () => appendOperator(btn.dataset.op)));
+        document.getElementById('equal-btn').addEventListener('click', calculateResult);
+        document.getElementById('clear-btn').addEventListener('click', clearAll);
+        document.getElementById('backspace-btn').addEventListener('click', backspaceOne);
+        editToggle.addEventListener('click', () => {
+            if (!editing) { history.textContent = currentExpression.trim(); setEditing(true); } else { tryApplyEdit(); }
+        });
+        editCancel.addEventListener('click', cancelEdit);
+        history.addEventListener('keydown', (e) => {
+            if (!editing) return;
+            if (e.key === 'Enter') { e.preventDefault(); tryApplyEdit(); }
+            if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+        });
+        
+        // ★ キーボードイベント修正：テンキー対応、Delete対応、IME対応 ★
+        document.addEventListener('keydown', (e) => {
+            if (simpleContainer.classList.contains('hidden')) return;
+            if (e.target.closest('input, textarea, [contenteditable="true"]')) return;
+            if (editing) return;
+
+            // 数字 (0-9)
+            if (e.key >= '0' && e.key <= '9') { appendNumber(e.key); e.preventDefault(); }
+            // コロン (テンキーのピリオドも含む)
+            else if (e.key === ':' || e.key === ';' || e.key === '.') { appendColon(); e.preventDefault(); }
+            // 演算子
+            else if (e.key === '+') { appendOperator('+'); e.preventDefault(); }
+            else if (e.key === '-') { appendOperator('-'); e.preventDefault(); }
+            // 決定
+            else if (e.key === 'Enter' || e.key === '=') { calculateResult(); e.preventDefault(); }
+            // 削除 (Backspace / Delete)
+            else if (e.key === 'Backspace' || e.key === 'Delete') { backspaceOne(); e.preventDefault(); }
+            // クリア
+            else if (e.key === 'Escape' || e.key.toLowerCase() === 'c') { clearAll(); e.preventDefault(); }
+        });
+        updateDisplay();
     }
 
     // =======================================================
-    // ▼▼▼ 6. 尺計算機モード ▼▼▼
+    // ▼▼▼ 6. 尺計算機モード（自動保存対応） ▼▼▼
     // =======================================================
     function setupShakuCalculator() {
-        const STORAGE_KEY='shaku_calculator_data_v1';
-        const timeInputsContainer=document.getElementById('time-inputs'), calculateBtn=document.getElementById('calculate-btn'), resetBtn=document.getElementById('reset-btn'), addRowBtn=document.getElementById('add-row-btn');
-        const targetH=document.getElementById('target-h-input'), targetM=document.getElementById('target-m-input'), targetS=document.getElementById('target-s-input');
-        const resultContainer=document.getElementById('result-container'), resultEl=document.getElementById('result'), diffSection=document.getElementById('difference-section'), diffResult=document.getElementById('difference-result');
-        let rowCounter=0, audioCtx, fireworksActive=false;
-        function initAudio(){ try{ if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state==='suspended')audioCtx.resume(); }catch(e){} }
-        function saveState(){ const t={h:targetH.value,m:targetM.value,s:targetS.value}, rows=[]; document.querySelectorAll('.time-row').forEach(r=>{ rows.push({content:r.querySelector('.content-input').value,h:r.querySelector('.h-input').value,m:r.querySelector('.m-input').value,s:r.querySelector('.s-input').value}); }); localStorage.setItem(STORAGE_KEY,JSON.stringify({target:t,rows})); }
-        function loadState(){ const d=localStorage.getItem(STORAGE_KEY); if(!d)return false; try{ const j=JSON.parse(d); targetH.value=j.target.h||''; targetM.value=j.target.m||''; targetS.value=j.target.s||''; timeInputsContainer.innerHTML=''; rowCounter=0; if(j.rows&&j.rows.length>0)j.rows.forEach(r=>addInputRow(r)); else for(let i=0;i<3;i++)addInputRow(); return true; }catch(_){return false;} }
-        function addInputRow(data=null){ rowCounter++; const r=document.createElement('div'); r.className='time-row grid grid-cols-1 sm:grid-cols-[auto_1fr_auto] gap-x-4 gap-y-2 items-center bg-white dark:bg-gray-800 p-3 rounded-lg shadow'; const c=data?data.content:'', h=data?data.h:'', m=data?data.m:'', s=data?data.s:''; r.innerHTML=`<span class="w-8 text-left sm:text-center font-medium text-gray-500 dark:text-gray-400">${rowCounter}.</span><div class="w-full"><input type="text" value="${c}" placeholder="内容" class="content-input w-full p-2 bg-gray-100 dark:bg-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"></div><div class="flex items-center gap-2"><input type="number" value="${h}" min="0" data-max="99" placeholder="H" class="h-input w-16 p-2 text-center bg-gray-100 dark:bg-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"><span class="font-bold text-gray-500 dark:text-gray-400">:</span><input type="number" value="${m}" min="0" max="59" data-max="59" placeholder="M" class="m-input w-16 p-2 text-center bg-gray-100 dark:bg-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"><span class="font-bold text-gray-500 dark:text-gray-400">:</span><input type="number" value="${s}" min="0" max="59" data-max="59" placeholder="S" class="s-input w-16 p-2 text-center bg-gray-100 dark:bg-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"></div>`; timeInputsContainer.appendChild(r); }
-        function initialize(){ if(!loadState())for(let i=0;i<3;i++)addInputRow(); }
-        function reset(){ localStorage.removeItem(STORAGE_KEY); timeInputsContainer.innerHTML=''; rowCounter=0; for(let i=0;i<3;i++)addInputRow(); targetH.value=''; targetM.value=''; targetS.value=''; resultContainer.classList.add('hidden'); }
-        function val(v,max){ const m=max?parseInt(max,10):999; if(v===''||isNaN(v))return 0; return Math.min(Math.max(0,parseInt(v,10)),m); }
-        function fmt(h,m,s){ return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; }
-        function calc(){
-            let tot=0; document.querySelectorAll('.time-row').forEach(r=>{ const h=val(r.querySelector('.h-input').value,99), m=val(r.querySelector('.m-input').value,59), s=val(r.querySelector('.s-input').value,59); tot+=(h*3600)+(m*60)+s; });
-            resultEl.textContent=fmt(Math.floor(tot/3600),Math.floor((tot%3600)/60),tot%60);
-            const tgt=(val(targetH.value,99)*3600)+(val(targetM.value,59)*60)+val(targetS.value,59);
-            if(tgt>0){ const diff=tgt-tot, abs=Math.abs(diff), f=fmt(Math.floor(abs/3600),Math.floor((abs%3600)/60),abs%60); diffResult.classList.remove('text-red-500','text-blue-500'); if(diff<0){diffResult.textContent=`オーバー ${f}`;diffResult.classList.add('text-red-500');}else if(diff>0){diffResult.textContent=`不足 ${f}`;diffResult.classList.add('text-red-500');}else{diffResult.textContent="完尺";diffResult.classList.add('text-blue-500');fireworks();} diffSection.classList.remove('hidden'); } else diffSection.classList.add('hidden');
+        const INITIAL_ROWS = 3;
+        const STORAGE_KEY = 'shaku_calculator_data_v1';
+        const timeInputsContainer = document.getElementById('time-inputs');
+        const calculateBtn = document.getElementById('calculate-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const addRowBtn = document.getElementById('add-row-btn');
+        const targetHInput = document.getElementById('target-h-input');
+        const targetMInput = document.getElementById('target-m-input');
+        const targetSInput = document.getElementById('target-s-input');
+        const resultContainer = document.getElementById('result-container');
+        const resultEl = document.getElementById('result');
+        const differenceSection = document.getElementById('difference-section');
+        const differenceResultEl = document.getElementById('difference-result');
+        let rowCounter = 0;
+        let audioCtx; 
+        let fireworksActive = false;
+
+        function initAudio() {
+            try {
+                if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+                if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+            } catch (e) { console.error("AudioContext Error", e); }
+        }
+
+        function saveState() {
+            const target = { h: targetHInput.value, m: targetMInput.value, s: targetSInput.value };
+            const rows = [];
+            document.querySelectorAll('.time-row').forEach(row => {
+                rows.push({
+                    content: row.querySelector('.content-input').value,
+                    h: row.querySelector('.h-input').value,
+                    m: row.querySelector('.m-input').value,
+                    s: row.querySelector('.s-input').value
+                });
+            });
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ target, rows }));
+        }
+
+        function loadState() {
+            const dataJSON = localStorage.getItem(STORAGE_KEY);
+            if (!dataJSON) return false;
+            try {
+                const data = JSON.parse(dataJSON);
+                targetHInput.value = data.target.h || '';
+                targetMInput.value = data.target.m || '';
+                targetSInput.value = data.target.s || '';
+                timeInputsContainer.innerHTML = '';
+                rowCounter = 0;
+                if (data.rows && data.rows.length > 0) {
+                    data.rows.forEach(rowData => addInputRow(rowData));
+                } else {
+                    for (let i = 0; i < INITIAL_ROWS; i++) addInputRow();
+                }
+                return true;
+            } catch (e) { return false; }
+        }
+
+        function addInputRow(rowData = null) {
+            rowCounter++;
+            const row = document.createElement('div');
+            row.className = 'time-row grid grid-cols-1 sm:grid-cols-[auto_1fr_auto] gap-x-4 gap-y-2 items-center bg-white dark:bg-gray-800 p-3 rounded-lg shadow';
+            const contentVal = rowData ? rowData.content : '';
+            const hVal = rowData ? rowData.h : '';
+            const mVal = rowData ? rowData.m : '';
+            const sVal = rowData ? rowData.s : '';
+
+            row.innerHTML = `
+                <span class="w-8 text-left sm:text-center font-medium text-gray-500 dark:text-gray-400">${rowCounter}.</span>
+                <div class="w-full">
+                    <input type="text" value="${contentVal}" placeholder="内容" class="content-input w-full p-2 bg-gray-100 dark:bg-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="number" value="${hVal}" min="0" data-max="99" placeholder="H" class="h-input w-16 p-2 text-center bg-gray-100 dark:bg-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    <span class="font-bold text-gray-500 dark:text-gray-400">:</span>
+                    <input type="number" value="${mVal}" min="0" max="59" data-max="59" placeholder="M" class="m-input w-16 p-2 text-center bg-gray-100 dark:bg-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    <span class="font-bold text-gray-500 dark:text-gray-400">:</span>
+                    <input type="number" value="${sVal}" min="0" max="59" data-max="59" placeholder="S" class="s-input w-16 p-2 text-center bg-gray-100 dark:bg-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                </div>
+            `;
+            timeInputsContainer.appendChild(row);
+        }
+
+        function initialize() {
+            if (!loadState()) { for (let i = 0; i < INITIAL_ROWS; i++) addInputRow(); }
+        }
+
+        function resetAllInputs() {
+            localStorage.removeItem(STORAGE_KEY);
+            timeInputsContainer.innerHTML = ''; rowCounter = 0;
+            for (let i = 0; i < INITIAL_ROWS; i++) addInputRow();
+            targetHInput.value = ''; targetMInput.value = ''; targetSInput.value = '';
+            resultContainer.classList.add('hidden');
+            differenceSection.classList.add('hidden');
+        }
+
+        function validateTimeInput(value, max) {
+            const maxVal = max ? parseInt(max, 10) : 999;
+            if (value === '' || isNaN(value)) return 0;
+            return Math.min(Math.max(0, parseInt(value, 10)), maxVal);
+        }
+
+        function formatTime(hours, minutes, seconds) {
+            return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        function calculateTotal() {
+            let totalSeconds = 0;
+            document.querySelectorAll('.time-row').forEach(row => {
+                const h = validateTimeInput(row.querySelector('.h-input').value, row.querySelector('.h-input').dataset.max);
+                const m = validateTimeInput(row.querySelector('.m-input').value, row.querySelector('.m-input').dataset.max);
+                const s = validateTimeInput(row.querySelector('.s-input').value, row.querySelector('.s-input').dataset.max);
+                totalSeconds += (h * 3600) + (m * 60) + s;
+            });
+            resultEl.textContent = formatTime(Math.floor(totalSeconds / 3600), Math.floor((totalSeconds % 3600) / 60), totalSeconds % 60);
+            
+            const targetTotalSeconds = (validateTimeInput(targetHInput.value, targetHInput.dataset.max) * 3600) + (validateTimeInput(targetMInput.value, targetMInput.dataset.max) * 60) + validateTimeInput(targetSInput.value, targetSInput.dataset.max);
+            if (targetTotalSeconds > 0) {
+                const differenceInSeconds = targetTotalSeconds - totalSeconds;
+                const absDifference = Math.abs(differenceInSeconds);
+                const formattedDifference = formatTime(Math.floor(absDifference / 3600), Math.floor((absDifference % 3600) / 60), absDifference % 60);
+                differenceResultEl.classList.remove('text-red-500', 'text-blue-500');
+                if (differenceInSeconds < 0) {
+                    differenceResultEl.textContent = `オーバー ${formattedDifference}`;
+                    differenceResultEl.classList.add('text-red-500');
+                } else if (differenceInSeconds > 0) {
+                    differenceResultEl.textContent = `不足 ${formattedDifference}`;
+                    differenceResultEl.classList.add('text-red-500');
+                } else {
+                    differenceResultEl.textContent = "完尺";
+                    differenceResultEl.classList.add('text-blue-500');
+                    launchFireworks(); 
+                }
+                differenceSection.classList.remove('hidden');
+            } else {
+                differenceSection.classList.add('hidden');
+            }
             resultContainer.classList.remove('hidden');
         }
-        function fireworks(){ if(fireworksActive)return; fireworksActive=true; const c=document.getElementById('fireworks-container'); let cnt=0; const i=setInterval(()=>{ if(cnt>10){clearInterval(i);fireworksActive=false;return;} createBurst(c,Math.random()*100,Math.random()*100); cnt++; },300); }
-        function createBurst(c,x,y){ const cols=['#ff595e','#ffca3a','#8ac926','#1982c4','#6a4c93']; for(let i=0;i<30;i++){ const p=document.createElement('div'); p.className='confetti '+(Math.random()>.5?'circle':'rect'); p.style.backgroundColor=cols[Math.floor(Math.random()*cols.length)]; p.style.left=x+'%'; p.style.top=y+'%'; const a=Math.random()*360, v=50+Math.random()*100; p.style.setProperty('--x',(Math.cos(a*Math.PI/180)*v)+'px'); p.style.setProperty('--y',(Math.sin(a*Math.PI/180)*v)+'px'); c.appendChild(p); setTimeout(()=>p.remove(),2500); } }
-        
-        initialize(); addRowBtn.addEventListener('click',()=>{addInputRow();saveState();}); calculateBtn.addEventListener('click',()=>{initAudio();calc();}); resetBtn.addEventListener('click',reset); document.getElementById('shaku-calculator-container').addEventListener('input',e=>{if(e.target.tagName==='INPUT')saveState();});
+
+        function launchFireworks() {
+             if(fireworksActive) return;
+             fireworksActive = true;
+             const container = document.getElementById('fireworks-container');
+             let count = 0;
+             const interval = setInterval(() => {
+                 if(count > 10) { clearInterval(interval); fireworksActive = false; return; }
+                 createBurst(container, Math.random() * 100, Math.random() * 100);
+                 count++;
+             }, 300);
+        }
+        function createBurst(container, startX, startY) {
+            const colors = ['#ff595e', '#ffca3a', '#8ac926', '#1982c4', '#6a4c93'];
+            for (let i = 0; i < 30; i++) {
+                const confetti = document.createElement('div');
+                confetti.classList.add('confetti');
+                if (Math.random() > 0.5) confetti.classList.add('circle'); else confetti.classList.add('rect');
+                confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                confetti.style.left = startX + '%';
+                confetti.style.top = startY + '%';
+                const angle = Math.random() * 360;
+                const velocity = 50 + Math.random() * 100;
+                const x = Math.cos(angle * Math.PI / 180) * velocity + 'px';
+                const y = Math.sin(angle * Math.PI / 180) * velocity + 'px';
+                confetti.style.setProperty('--x', x);
+                confetti.style.setProperty('--y', y);
+                container.appendChild(confetti);
+                setTimeout(() => confetti.remove(), 2500);
+            }
+        }
+
+        initialize();
+        addRowBtn.addEventListener('click', () => { addInputRow(); saveState(); });
+        calculateBtn.addEventListener('click', () => { initAudio(); calculateTotal(); });
+        resetBtn.addEventListener('click', resetAllInputs);
+        document.getElementById('shaku-calculator-container').addEventListener('input', (e) => {
+            if (e.target.tagName === 'INPUT') saveState();
+        });
     }
     </script>
 </body>
