@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>計算ツールキット</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+        }
+        /* 電卓モード用のフォント指定 */
+        #simple-calculator-container {
+            font-family: 'Roboto Mono', monospace; 
+        }
+        /* contenteditableのデフォルトアウトラインを無効化 */
+        [contenteditable]:focus {
+            outline: none;
+        }
+        /* 数字入力欄の矢印を非表示 */
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
+        
+        /* 花火エフェクト用のCSS */
+        #fireworks-container {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 9999; overflow: hidden;
+        }
+        .confetti {
+            position: absolute; opacity: 0;
+            animation: burst 2.5s ease-out forwards;
+        }
+        .confetti.circle { width: 10px; height: 10px; border-radius: 50%; }
+        .confetti.rect { width: 8px; height: 15px; }
+        @keyframes burst {
+            0% { transform: translate(-50%, -50%) rotate(0deg) scale(0); opacity: 1; }
+            100% { transform: translate(var(--x), calc(var(--y) + 200px)) rotate(720deg) scale(1); opacity: 0; }
+        }
+        
+        /* TC変換の結果表示用ハイライト */
+        #tc-result-timecode {
+            background-color: rgba(234,179,8, 0.1); /* yellow-500 */
+            border-radius: 0.375rem;
+            padding: 0.25rem 0.5rem;
+            display: inline-block;
+        }
+        .dark #tc-result-timecode {
+            background-color: rgba(251,191,36, 0.15); /* amber-400 */
+        }
+
+        /* アスペクト比計算機のアクティブボタン */
+        .ar-active {
+            background-color: #4f46e5; /* indigo-600 */
+            color: white;
+            border-color: #4f46e5;
+        }
+        .ar-inactive {
+            background-color: white;
+            color: #4b5563; /* gray-600 */
+            border-color: #d1d5db; /* gray-300 */
+        }
+        .dark .ar-inactive {
+            background-color: #374151; /* gray-700 */
+            color: #d1d5db; /* gray-300 */
+            border-color: #4b5563; /* gray-600 */
+        }
+        
+        /* タブのスクロールバーを隠す */
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 transition-colors duration-300">
+
+    <div id="fireworks-container"></div>
+
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-4xl min-h-screen flex flex-col">
+        
+        <header class="text-center mb-6">
+            <h1 class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 dark:text-white">計算ツールキット</h1>
+            <p id="app-description" class="mt-2 text-sm sm:text-base text-gray-600 dark:text-gray-400">
+                </p>
+        </header>
+
+        <div class="mb-6 flex flex-wrap justify-center border-b border-gray-200 dark:border-gray-700 overflow-x-auto whitespace-nowrap scrollbar-hide">
+            <button id="mode-bitrate" class="mode-tab px-4 py-3 font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors whitespace-nowrap">
+                ビットレート
+            </button>
+            <button id="mode-filesize" class="mode-tab px-4 py-3 font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors whitespace-nowrap">
+                ファイルサイズ
+            </button>
+            <button id="mode-aspect" class="mode-tab px-4 py-3 font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors whitespace-nowrap">
+                アスペクト比
+            </button>
+            <button id="mode-tc-conv" class="mode-tab px-4 py-3 font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors whitespace-nowrap">
+                TC変換
+            </button>
+            <button id="mode-simple" class="mode-tab px-4 py-3 font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors whitespace-nowrap">
+                電卓
+            </button>
+            <button id="mode-shaku" class="mode-tab px-4 py-3 font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors whitespace-nowrap">
+                尺計算
+            </button>
+        </div>
+
+        <div id="bitrate-container" class="hidden">
+            <div class="max-w-md mx-auto bg-white dark:bg-gray-800 p-6 sm:p-8 rounded-2xl shadow-lg">
+                <div class="text-center mb-6">
+                    <h2 class="text-xl font-bold text-gray-900 dark:text-white">ビットレート計算</h2>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">目標サイズからビットレートを算出</p>
+                </div>
+                <div class="mt-6">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">目標ファイルサイズ (MB)</label>
+                    <input type="number" id="br-targetSize" inputmode="decimal" min="1" value="500" placeholder="例: 500" class="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                </div>
+                <div class="mt-6">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">動画の尺（時間）</label>
+                    <div class="grid grid-cols-3 gap-2 sm:gap-4">
+                        <input type="number" id="br-hours" inputmode="numeric" min="0" placeholder="時間" class="p-3 text-center bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 transition">
+                        <input type="number" id="br-minutes" inputmode="numeric" min="0" placeholder="分" class="p-3 text-center bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 transition">
+                        <input type="number" id="br-seconds" inputmode="numeric" min="0" placeholder="秒" class="p-3 text-center bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 transition">
+                    </div>
+                </div>
+                <div class="mt-8">
+                    <button id="br-calculateBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105">計算する</button>
+                </div>
+                <div id="br-result" class="mt-8 p-5 text-center rounded-lg hidden"></div>
+                <div class="mt-4">
+                     <button id="br-clearBtn" class="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition">入力をクリア</button>
+                </div>
+                <div class="mt-6 text-center">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">※映像と音声の合計値の目安です。</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="filesize-container" class="hidden">
+            <div class="max-w-md mx-auto bg-white dark:bg-gray-800 p-6 sm:p-8 rounded-2xl shadow-lg">
+                <div class="text-center mb-6">
+                    <h2 class="text-xl font-bold text-gray-900 dark:text-white">ファイルサイズ計算</h2>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">ビットレートからサイズを予測</p>
+                </div>
+                <div class="mt-6">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">ビットレート (Mbps)</label>
+                    <input type="number" id="fs-targetBitrate" inputmode="decimal" min="0.01" step="0.01" value="5" placeholder="例: 5" class="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                </div>
+                <div class="mt-6">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">動画の尺（時間）</label>
+                    <div class="grid grid-cols-3 gap-2 sm:gap-4">
+                        <input type="number" id="fs-hours" inputmode="numeric" min="0" placeholder="時間" class="p-3 text-center bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 transition">
+                        <input type="number" id="fs-minutes" inputmode="numeric" min="0" placeholder="分" class="p-3 text-center bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 transition">
+                        <input type="number" id="fs-seconds" inputmode="numeric" min="0" placeholder="秒" class="p-3 text-center bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 transition">
+                    </div>
+                </div>
+                <div class="mt-8">
+                    <button id="fs-calculateBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105">計算する</button>
+                </div>
+                <div id="fs-result" class="mt-8 p-5 text-center rounded-lg hidden"></div>
+                <div class="mt-4">
+                     <button id="fs-clearBtn" class="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition">入力をクリア</button>
+                </div>
+                <div class="mt-6 text-center">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">※映像と音声の合計値の目安です。</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="aspect-container" class="hidden">
+            <div class="max-w-md mx-auto bg-white dark:bg-gray-800 p-6 sm:p-8 rounded-2xl shadow-lg">
+                <div class="text-center mb-6">
+                    <h2 class="text-xl font-bold text-gray-900 dark:text-white">アスペクト比・解像度</h2>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">解像度と比率の相互計算</p>
+                </div>
+
+                <div class="flex justify-center mb-6 gap-2">
+                    <button id="ar-mode-calc-res" class="px-4 py-2 rounded-lg font-semibold text-sm border transition ar-active">解像度を計算</button>
+                    <button id="ar-mode-calc-ratio" class="px-4 py-2 rounded-lg font-semibold text-sm border transition ar-inactive">比率を計算</button>
+                </div>
+
+                <div id="ar-form-res">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">基準とする辺</label>
+                        <div class="flex gap-4">
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio" name="ar-base-side" value="width" checked class="w-4 h-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span class="ml-2 text-gray-800 dark:text-gray-200">幅 (Width)</span>
+                            </label>
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio" name="ar-base-side" value="height" class="w-4 h-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span class="ml-2 text-gray-800 dark:text-gray-200">高さ (Height)</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">基準値 (px)</label>
+                        <input type="number" id="ar-res-input-val" class="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="例: 1920">
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">アスペクト比</label>
+                        <select id="ar-res-select-ratio" class="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none">
+                            <option value="16:9">16:9 (YouTube/TV)</option>
+                            <option value="9:16">9:16 (TikTok/Shorts)</option>
+                            <option value="4:3">4:3 (SD TV/iPad)</option>
+                            <option value="1:1">1:1 (Instagram Square)</option>
+                            <option value="4:5">4:5 (Instagram Portrait)</option>
+                            <option value="2.35:1">2.35:1 (CinemaScope)</option>
+                            <option value="custom">カスタム</option>
+                        </select>
+                        <div id="ar-res-custom-ratio-area" class="flex items-center gap-2 mt-2 hidden">
+                            <input type="number" id="ar-res-custom-w" placeholder="W" class="w-full p-2 text-center bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg">
+                            <span class="font-bold text-gray-500">:</span>
+                            <input type="number" id="ar-res-custom-h" placeholder="H" class="w-full p-2 text-center bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg">
+                        </div>
+                    </div>
+                    <button id="ar-btn-calc-res" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105">計算する</button>
+                </div>
+
+                <div id="ar-form-ratio" class="hidden">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">解像度 (px)</label>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="ar-ratio-w" placeholder="幅 (W)" class="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none">
+                            <span class="font-bold text-gray-500">x</span>
+                            <input type="number" id="ar-ratio-h" placeholder="高さ (H)" class="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-indigo-500 outline-none">
+                        </div>
+                    </div>
+                    <button id="ar-btn-calc-ratio" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-transform transform hover:scale-105">比率を算出</button>
+                </div>
+
+                <div id="ar-result" class="mt-8 p-5 text-center rounded-lg hidden"></div>
+                
+                <div class="mt-4">
+                     <button id="ar-clearBtn" class="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition">入力をクリア</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="tc-conversion-container" class="hidden">
+            <div class="max-w-md mx-auto bg-white dark:bg-gray-800 p-6 sm:p-8 rounded-2xl shadow-lg">
+                <div class="text-center mb-6">
+                    <h2 class="text-xl font-bold text-gray-900 dark:text-white">タイムコード変換</h2>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">異なるフレームレート間での変換</p>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">変換元タイムコード</label>
+                    <div class="flex justify-center items-center gap-1 mb-3">
+                        <input type="number" min="0" placeholder="HH" id="tc-source-h" class="w-1/4 p-2 text-center text-lg bg-gray-100 dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" inputmode="numeric">
+                        <span class="font-bold text-xl text-gray-500 dark:text-gray-400">:</span>
+                        <input type="number" min="0" max="59" placeholder="MM" id="tc-source-m" class="w-1/4 p-2 text-center text-lg bg-gray-100 dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" inputmode="numeric">
+                        <span class="font-bold text-xl text-gray-500 dark:text-gray-400">:</span>
+                        <input type="number" min="0" max="59" placeholder="SS" id="tc-source-s" class="w-1/4 p-2 text-center text-lg bg-gray-100 dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" inputmode="numeric">
+                        <span id="tc-source-separator" class="font-bold text-xl text-gray-500 dark:text-gray-400">:</span>
+                        <input type="number" min="0" placeholder="FF" id="tc-source-f" class="w-1/4 p-2 text-center text-lg bg-gray-100 dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none" inputmode="numeric">
+                    </div>
+                    <select id="tc-source-format" class="w-full p-3 text-base bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <option value="29.97_ndf">29.97 fps NDF</option>
+                        <option value="23.976_ndf">23.976 fps NDF (24p)</option>
+                        <option value="29.97_df">29.97 fps DF</option>
+                    </select>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">変換先フォーマット</label>
+                    <select id="tc-target-format" class="w-full p-3 text-base bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <option value="29.97_ndf">29.97 fps NDF</option>
+                        <option value="23.976_ndf">23.976 fps NDF (24p)</option>
+                        <option value="29.97_df">29.97 fps DF</option>
+                    </select>
+                </div>
+
+                <div class="flex gap-3 mb-6">
+                    <button id="tc-convert-btn" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">変換</button>
+                    <button id="tc-clear-btn" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition">クリア</button>
+                </div>
+
+                <div id="tc-result-wrapper" class="bg-gray-50 dark:bg-gray-700 p-5 rounded-xl hidden">
+                    <h2 id="tc-result-title" class="text-lg font-semibold text-gray-900 dark:text-white mb-2 text-center"></h2>
+                    <div class="relative flex justify-center items-center mb-2">
+                        <p id="tc-result-timecode" class="text-3xl sm:text-4xl font-bold tracking-wider text-green-700 dark:text-green-400"></p>
+                        <button id="tc-copy-btn" class="absolute right-0 text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors ml-2" title="コピー">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <p id="tc-extra-info" class="text-center text-sm text-gray-600 dark:text-gray-300"></p>
+                    <p id="tc-copy-feedback" class="text-center text-xs text-green-600 dark:text-green-400 mt-1 h-4"></p>
+                </div>
+            </div>
+        </div>
+
+
+        <div id="simple-calculator-container" class="hidden flex items-center justify-center antialiased">
+            <div class="bg-white dark:bg-gray-800 w-full max-w-md p-6 rounded-3xl shadow-lg space-y-4">
+                <div class="bg-gray-200 dark:bg-gray-900 p-4 rounded-xl shadow-inner">
+                    <div id="calc-history" class="text-right text-lg font-mono font-medium text-gray-500 dark:text-gray-400 mb-2 overflow-x-auto whitespace-nowrap min-h-[1.75rem]" aria-label="計算式（編集可）"></div>
+                    <div id="calc-display" class="text-right font-mono font-bold text-5xl md:text-6xl text-gray-800 dark:text-white tracking-tight leading-none select-none" style="font-variant-numeric: tabular-nums;">00:00:00</div>
+                </div>
+                <div class="flex items-center justify-between px-1">
+                    <div id="edit-hint" class="text-xs text-gray-500 dark:text-gray-400 select-none">式の訂正：編集 → 適用（Enter）/ 取消（Esc）</div>
+                    <div class="flex gap-2">
+                        <button id="edit-cancel" class="hidden text-xs px-3 py-1 rounded-md text-gray-300 bg-gray-600 hover:bg-gray-500 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors">取消</button>
+                        <button id="edit-toggle" class="text-xs px-3 py-1 rounded-md text-blue-800 bg-blue-200 hover:bg-blue-300 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900/80 transition-colors">編集</button>
+                    </div>
+                </div>
+                <div id="edit-error" class="text-red-500 text-sm min-h-[1.25rem] px-1"></div>
+                <div class="grid grid-cols-4 gap-3 md:gap-4">
+                    <button class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-gray-800 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600" data-num="7">7</button>
+                    <button class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-gray-800 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600" data-num="8">8</button>
+                    <button class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-gray-800 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600" data-num="9">9</button>
+                    <button id="clear-btn" class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-white bg-rose-600 hover:bg-rose-500">C</button>
+                    <button class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-gray-800 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600" data-num="4">4</button>
+                    <button class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-gray-800 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600" data-num="5">5</button>
+                    <button class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-gray-800 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600" data-num="6">6</button>
+                    <button id="backspace-btn" class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-white bg-amber-600 hover:bg-amber-500">←</button>
+                    <button class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-gray-800 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600" data-num="1">1</button>
+                    <button class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-gray-800 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600" data-num="2">2</button>
+                    <button class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-gray-800 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600" data-num="3">3</button>
+                    <button class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-white bg-blue-600 hover:bg-blue-500" data-op="-">－</button>
+                    <button class="col-span-2 h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-gray-800 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600" data-num="0">0</button>
+                    <button id="colon-btn" class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-gray-800 dark:text-white bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600">:</button>
+                    <button class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-white bg-blue-600 hover:bg-blue-500" data-op="+">＋</button>
+                    <div></div><div></div><div></div>
+                    <button id="equal-btn" class="h-16 md:h-20 text-2xl md:text-3xl font-semibold rounded-xl shadow-md transition-transform duration-100 active:scale-95 text-white bg-emerald-500 hover:bg-emerald-400">＝</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="shaku-calculator-container" class="hidden">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg mb-8">
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-4 text-center">目標尺設定</h2>
+                <div class="flex justify-center items-center gap-2">
+                    <input type="number" min="0" data-max="99" placeholder="H" id="target-h-input" class="w-24 p-3 text-center text-lg bg-gray-100 dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <span class="font-bold text-2xl text-gray-500 dark:text-gray-400">:</span>
+                    <input type="number" min="0" max="59" data-max="59" placeholder="M" id="target-m-input" class="w-24 p-3 text-center text-lg bg-gray-100 dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <span class="font-bold text-2xl text-gray-500 dark:text-gray-400">:</span>
+                    <input type="number" min="0" max="59" data-max="59" placeholder="S" id="target-s-input" class="w-24 p-3 text-center text-lg bg-gray-100 dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+            </div>
+            <div id="time-inputs" class="space-y-3 mb-6"></div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+                <button id="add-row-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-all duration-200 ease-in-out transform hover:scale-105">入力欄を追加</button>
+                <button id="calculate-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-all duration-200 ease-in-out transform hover:scale-105">総尺を計算</button>
+                <button id="reset-btn" class="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-all duration-200 ease-in-out transform hover:scale-105">リセット</button>
+            </div>
+            <div id="result-container" class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg text-center hidden">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 divide-y md:divide-y-0 md:divide-x divide-gray-200 dark:divide-gray-700">
+                    <div class="py-4 md:py-0 md:pr-6">
+                        <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">総尺</h2>
+                        <p id="result" class="text-4xl sm:text-5xl font-bold text-blue-600 dark:text-blue-400 tracking-wider"></p>
+                    </div>
+                    <div id="difference-section" class="hidden pt-4 md:pt-0 md:pl-6">
+                        <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">残り尺</h2>
+                        <p id="difference-result" class="text-3xl sm:text-4xl font-bold tracking-wider"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <footer class="mt-auto pt-12 pb-6 flex justify-center opacity-80 hover:opacity-100 transition-opacity">
+           <img src="https://i.imgur.com/5rKpGlp.png" alt="Company Logo" style="width: 120px; display: block;">
+        </footer>
+
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // --- タブ要素 ---
+        const tabs = {
+            bitrate: document.getElementById('mode-bitrate'),
+            filesize: document.getElementById('mode-filesize'),
+            aspect: document.getElementById('mode-aspect'),
+            tc: document.getElementById('mode-tc-conv'),
+            simple: document.getElementById('mode-simple'),
+            shaku: document.getElementById('mode-shaku')
+        };
+
+        // --- コンテナ要素 ---
+        const containers = {
+            bitrate: document.getElementById('bitrate-container'),
+            filesize: document.getElementById('filesize-container'),
+            aspect: document.getElementById('aspect-container'),
+            tc: document.getElementById('tc-conversion-container'),
+            simple: document.getElementById('simple-calculator-container'),
+            shaku: document.getElementById('shaku-calculator-container')
+        };
+
+        const appDescription = document.getElementById('app-description');
+        
+        // --- モード切替ロジック ---
+        function switchMode(modeName) {
+            Object.values(containers).forEach(el => el.classList.add('hidden'));
+            Object.values(tabs).forEach(el => {
+                el.classList.remove('border-blue-500', 'text-blue-600', 'dark:text-blue-400');
+                el.classList.add('border-transparent', 'text-gray-500');
+            });
+
+            containers[modeName].classList.remove('hidden');
+            tabs[modeName].classList.add('border-blue-500', 'text-blue-600', 'dark:text-blue-400');
+            tabs[modeName].classList.remove('border-transparent', 'text-gray-500');
+
+            switch(modeName) {
+                case 'bitrate': appDescription.textContent = '目標ファイルサイズと時間からビットレートを計算します。'; break;
+                case 'filesize': appDescription.textContent = 'ビットレートと時間からファイルサイズを計算します。'; break;
+                case 'aspect': appDescription.textContent = '解像度とアスペクト比を相互に計算します。'; break;
+                case 'tc': appDescription.textContent = '異なるフレームレートのタイムコードを相互に変換します。'; break;
+                case 'simple': appDescription.textContent = 'タイムコード計算専用の電卓です。'; break;
+                case 'shaku': appDescription.textContent = '複数のタイムコードを合計し、目標尺との差を計算します。'; break;
+            }
+        }
+
+        tabs.bitrate.addEventListener('click', () => switchMode('bitrate'));
+        tabs.filesize.addEventListener('click', () => switchMode('filesize'));
+        tabs.aspect.addEventListener('click', () => switchMode('aspect'));
+        tabs.tc.addEventListener('click', () => switchMode('tc'));
+        tabs.simple.addEventListener('click', () => switchMode('simple'));
+        tabs.shaku.addEventListener('click', () => switchMode('shaku'));
+
+        // --- 初期化 ---
+        setupBitrateOnlyCalculator();
+        setupFileSizeOnlyCalculator();
+        setupAspectRatioCalculator();
+        setupTimecodeConverter();
+        setupSimpleCalculator();
+        setupShakuCalculator();
+
+        // デフォルトモード
+        switchMode('bitrate');
+    });
+
+    // --- 共通ヘルパー ---
+    function showError(el, msg) {
+        el.classList.remove('hidden');
+        el.classList.add('bg-red-100', 'dark:bg-red-800');
+        el.innerHTML = `<p class="font-semibold text-red-800 dark:text-red-200">${msg}</p>`;
+    }
+    function showResult(el, val, label) {
+        el.classList.remove('hidden');
+        el.classList.add('bg-green-100', 'dark:bg-green-800');
+        el.innerHTML = `<p class="text-sm text-green-800 dark:text-green-200">${label}</p><p class="text-3xl font-bold text-green-900 dark:text-white mt-1">${val}</p>`;
+    }
+    function formatFileSize(sizeInMB) {
+        const unitStyle = '<span class="text-xl font-medium">'; const unitClose = '</span>';
+        if (sizeInMB < 1) return `${(sizeInMB * 1024).toFixed(2)} ${unitStyle}KB${unitClose}`;
+        else if (sizeInMB < 1024) return `${sizeInMB.toFixed(2)} ${unitStyle}MB${unitClose}`;
+        else if (sizeInMB < 1024 * 1024) return `${(sizeInMB / 1024).toFixed(2)} ${unitStyle}GB${unitClose}`;
+        else return `${(sizeInMB / (1024 * 1024)).toFixed(2)} ${unitStyle}TB${unitClose}`;
+    }
+    function autoCarryOver(hIn, mIn, sIn) {
+        function carryM() { let h=parseInt(hIn.value)||0, m=parseInt(mIn.value)||0; if(m>=60){ h+=Math.floor(m/60); mIn.value=m%60; hIn.value=h; } }
+        function carryS() { let m=parseInt(mIn.value)||0, s=parseInt(sIn.value)||0; if(s>=60){ m+=Math.floor(s/60); sIn.value=s%60; mIn.value=m; carryM(); } }
+        mIn.addEventListener('blur', carryM); sIn.addEventListener('blur', carryS);
+    }
+    function setupEnterKey(inputs, btn) {
+        inputs.forEach(input => { input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); btn.click(); } }); });
+    }
+
+    // =======================================================
+    // ▼▼▼ 1. ビットレート計算 (サイズ -> ビットレート) ▼▼▼
+    // =======================================================
+    function setupBitrateOnlyCalculator() {
+        const sizeInput=document.getElementById('br-targetSize'), hInput=document.getElementById('br-hours'), mInput=document.getElementById('br-minutes'), sInput=document.getElementById('br-seconds');
+        const calcBtn=document.getElementById('br-calculateBtn'), resultDiv=document.getElementById('br-result'), clearBtn=document.getElementById('br-clearBtn');
+        calcBtn.addEventListener('click', () => {
+            const h=parseInt(hInput.value)||0, m=parseInt(mInput.value)||0, s=parseInt(sInput.value)||0, sizeMB=parseFloat(sizeInput.value)||0;
+            resultDiv.classList.add('hidden'); resultDiv.className='mt-8 p-5 text-center rounded-lg hidden';
+            if(h<0||m<0||s<0){ showError(resultDiv, '時間には負の値を入力できません。'); return; }
+            const totalSeconds=(h*3600)+(m*60)+s;
+            if(totalSeconds<=0){ showError(resultDiv, '有効な動画の尺を入力してください。'); return; }
+            if(sizeMB<=0){ showError(resultDiv, 'ファイルサイズには0より大きい数値を入力してください。'); return; }
+            const bitrateMbps=(sizeMB*8)/totalSeconds;
+            showResult(resultDiv, `${bitrateMbps.toFixed(2)} <span class="text-xl font-medium">Mbps</span>`, '推奨ビットレート');
+        });
+        clearBtn.addEventListener('click', () => { sizeInput.value='500'; hInput.value=''; mInput.value=''; sInput.value=''; resultDiv.classList.add('hidden'); });
+        autoCarryOver(hInput, mInput, sInput); setupEnterKey([sizeInput, hInput, mInput, sInput], calcBtn);
+    }
+
+    // =======================================================
+    // ▼▼▼ 2. ファイルサイズ計算 (ビットレート -> サイズ) ▼▼▼
+    // =======================================================
+    function setupFileSizeOnlyCalculator() {
+        const bitrateInput=document.getElementById('fs-targetBitrate'), hInput=document.getElementById('fs-hours'), mInput=document.getElementById('fs-minutes'), sInput=document.getElementById('fs-seconds');
+        const calcBtn=document.getElementById('fs-calculateBtn'), resultDiv=document.getElementById('fs-result'), clearBtn=document.getElementById('fs-clearBtn');
+        calcBtn.addEventListener('click', () => {
+            const h=parseInt(hInput.value)||0, m=parseInt(mInput.value)||0, s=parseInt(sInput.value)||0, bitrateMbps=parseFloat(bitrateInput.value)||0;
+            resultDiv.classList.add('hidden'); resultDiv.className='mt-8 p-5 text-center rounded-lg hidden';
+            if(h<0||m<0||s<0){ showError(resultDiv, '時間には負の値を入力できません。'); return; }
+            const totalSeconds=(h*3600)+(m*60)+s;
+            if(totalSeconds<=0){ showError(resultDiv, '有効な動画の尺を入力してください。'); return; }
+            if(bitrateMbps<=0){ showError(resultDiv, 'ビットレートには0より大きい数値を入力してください。'); return; }
+            const sizeMB=(bitrateMbps*totalSeconds)/8;
+            showResult(resultDiv, formatFileSize(sizeMB), '予測ファイルサイズ');
+        });
+        clearBtn.addEventListener('click', () => { bitrateInput.value='5'; hInput.value=''; mInput.value=''; sInput.value=''; resultDiv.classList.add('hidden'); });
+        autoCarryOver(hInput, mInput, sInput); setupEnterKey([bitrateInput, hInput, mInput, sInput], calcBtn);
+    }
+
+    // =======================================================
+    // ▼▼▼ 3. アスペクト比・解像度計算 ▼▼▼
+    // =======================================================
+    function setupAspectRatioCalculator() {
+        const modeResBtn = document.getElementById('ar-mode-calc-res');
+        const modeRatioBtn = document.getElementById('ar-mode-calc-ratio');
+        const formRes = document.getElementById('ar-form-res');
+        const formRatio = document.getElementById('ar-form-ratio');
+        const resultDiv = document.getElementById('ar-result');
+        const clearBtn = document.getElementById('ar-clearBtn');
+
+        // Mode Switching
+        function setMode(mode) {
+            resultDiv.classList.add('hidden');
+            if (mode === 'res') {
+                modeResBtn.classList.replace('ar-inactive', 'ar-active');
+                modeRatioBtn.classList.replace('ar-active', 'ar-inactive');
+                formRes.classList.remove('hidden');
+                formRatio.classList.add('hidden');
+            } else {
+                modeRatioBtn.classList.replace('ar-inactive', 'ar-active');
+                modeResBtn.classList.replace('ar-active', 'ar-inactive');
+                formRatio.classList.remove('hidden');
+                formRes.classList.add('hidden');
+            }
+        }
+        modeResBtn.addEventListener('click', () => setMode('res'));
+        modeRatioBtn.addEventListener('click', () => setMode('ratio'));
+
+        // A. Calc Resolution Logic
+        const resInputVal = document.getElementById('ar-res-input-val');
+        const resSelectRatio = document.getElementById('ar-res-select-ratio');
+        const resCustomArea = document.getElementById('ar-res-custom-ratio-area');
+        const resCustomW = document.getElementById('ar-res-custom-w');
+        const resCustomH = document.getElementById('ar-res-custom-h');
+        const resBtn = document.getElementById('ar-btn-calc-res');
+        const radioBaseSide = document.getElementsByName('ar-base-side');
+
+        resSelectRatio.addEventListener('change', () => {
+            if (resSelectRatio.value === 'custom') resCustomArea.classList.remove('hidden');
+            else resCustomArea.classList.add('hidden');
+        });
+
+        resBtn.addEventListener('click', () => {
+            resultDiv.classList.add('hidden'); resultDiv.className='mt-8 p-5 text-center rounded-lg hidden';
+            const val = parseFloat(resInputVal.value);
+            if (!val || val <= 0) { showError(resultDiv, '正の数値を入力してください'); return; }
+
+            let ratioW, ratioH;
+            if (resSelectRatio.value === 'custom') {
+                ratioW = parseFloat(resCustomW.value);
+                ratioH = parseFloat(resCustomH.value);
+            } else {
+                const parts = resSelectRatio.value.split(':');
+                ratioW = parseFloat(parts[0]);
+                ratioH = parseFloat(parts[1]);
+                if(resSelectRatio.value === '2.35:1') { ratioW = 2.35; ratioH = 1; }
+            }
+
+            if (!ratioW || !ratioH || ratioW <= 0 || ratioH <= 0) { showError(resultDiv, '有効な比率を指定してください'); return; }
+
+            // Check selected base side
+            let isWidthBase = true;
+            for(let r of radioBaseSide) { if(r.checked && r.value === 'height') isWidthBase = false; }
+
+            let w, h;
+            if (isWidthBase) {
+                // Input is Width, Calc Height
+                w = val;
+                h = (val * ratioH) / ratioW;
+                showResult(resultDiv, `${Math.round(h)} <span class="text-xl font-medium">px</span>`, '高さ (Height)');
+            } else {
+                // Input is Height, Calc Width
+                h = val;
+                w = (val * ratioW) / ratioH;
+                showResult(resultDiv, `${Math.round(w)} <span class="text-xl font-medium">px</span>`, '幅 (Width)');
+            }
+        });
+
+        // B. Calc Ratio Logic
+        const ratioWInput = document.getElementById('ar-ratio-w');
+        const ratioHInput = document.getElementById('ar-ratio-h');
+        const ratioBtn = document.getElementById('ar-btn-calc-ratio');
+
+        function gcd(a, b) { return b == 0 ? a : gcd(b, a % b); }
+
+        ratioBtn.addEventListener('click', () => {
+            resultDiv.classList.add('hidden'); resultDiv.className='mt-8 p-5 text-center rounded-lg hidden';
+            const w = parseInt(ratioWInput.value);
+            const h = parseInt(ratioHInput.value);
+            if (!w || !h || w <= 0 || h <= 0) { showError(resultDiv, '幅と高さを正の整数で入力してください'); return; }
+
+            const divisor = gcd(w, h);
+            const rw = w / divisor;
+            const rh = h / divisor;
+            const decimal = (w / h).toFixed(3); // 1.778 etc
+
+            showResult(resultDiv, `${rw}:${rh} <span class="text-lg text-gray-500 block mt-1">(${decimal}:1)</span>`, 'アスペクト比');
+        });
+
+        clearBtn.addEventListener('click', () => {
+            resInputVal.value = ''; resCustomW.value = ''; resCustomH.value = '';
+            ratioWInput.value = ''; ratioHInput.value = '';
+            resultDiv.classList.add('hidden');
+        });
+        
+        // Enter Key Support
+        setupEnterKey([resInputVal, resCustomW, resCustomH], resBtn);
+        setupEnterKey([ratioWInput, ratioHInput], ratioBtn);
+    }
+
+    // =======================================================
+    // ▼▼▼ 4. TC変換 (DropFrame/NonDropFrame) ▼▼▼
+    // =======================================================
+    function setupTimecodeConverter() {
+        const h_in=document.getElementById('tc-source-h'), m_in=document.getElementById('tc-source-m'), s_in=document.getElementById('tc-source-s'), f_in=document.getElementById('tc-source-f');
+        const timeInputs=[h_in, m_in, s_in, f_in];
+        const sourceFormatSelect=document.getElementById('tc-source-format'), targetFormatSelect=document.getElementById('tc-target-format');
+        const convertBtn=document.getElementById('tc-convert-btn'), clearBtn=document.getElementById('tc-clear-btn');
+        const resultWrapper=document.getElementById('tc-result-wrapper'), resultTitle=document.getElementById('tc-result-title'), resultTimecode=document.getElementById('tc-result-timecode'), extraInfo=document.getElementById('tc-extra-info'), sourceSeparatorEl=document.getElementById('tc-source-separator'), copyBtn=document.getElementById('tc-copy-btn'), copyFeedback=document.getElementById('tc-copy-feedback');
+        
+        const formats={'29.97_ndf':{name:'29.97 fps NDF',timeBase:30,isDf:false,rate:30000/1001},'29.97_df':{name:'29.97 fps DF',timeBase:30,isDf:true,rate:30000/1001},'23.976_ndf':{name:'23.976 fps NDF (24p)',timeBase:24,isDf:false,rate:24000/1001}};
+        const clamp=(val,min,max)=>Math.min(Math.max(val,min),max);
+        const pad2=(n)=>String(n).padStart(2,'0');
+        const formatInputOnBlur=(e)=>{ if(e.target.value!=='') e.target.value=pad2(parseInt(e.target.value,10)); };
+
+        function updateSourceUI() {
+            const format=formats[sourceFormatSelect.value]; sourceSeparatorEl.textContent=format.isDf?';':':';
+            f_in.max=format.timeBase-1; if(parseInt(f_in.value)>=format.timeBase) f_in.value=format.timeBase-1;
+        }
+        function saveSettings(){ const s={h:h_in.value,m:m_in.value,s:s_in.value,f:f_in.value,source:sourceFormatSelect.value,target:targetFormatSelect.value}; localStorage.setItem('tcToolSettings',JSON.stringify(s)); }
+        function loadSettings(){ try{const s=JSON.parse(localStorage.getItem('tcToolSettings')||'{}'); if(s.h!=null)h_in.value=s.h; if(s.m!=null)m_in.value=s.m; if(s.s!=null)s_in.value=s.s; if(s.f!=null)f_in.value=s.f; if(s.source)sourceFormatSelect.value=s.source; if(s.target)targetFormatSelect.value=s.target;}catch(_){} }
+
+        function timecodeToFrames(h,m,s,f,fmt){
+            const{timeBase,isDf}=fmt; let total=(h*3600+m*60+s)*timeBase+f;
+            if(isDf){ const tm=h*60+m; const drop=2*(tm-Math.floor(tm/10)); total-=drop; } return total;
+        }
+        function framesToTimecode(total,fmt){
+            const{timeBase,isDf}=fmt; let fc=Math.round(total);
+            if(isDf){ const d=2, fpm=timeBase*60, fp10m=fpm*10-d*9, n10m=Math.floor(fc/fp10m), rem=fc%fp10m; let dropAmt=d*9*n10m; if(rem>d) dropAmt+=d*Math.floor((rem-d)/(fpm-d)); fc+=dropAmt; }
+            const ff=fc%timeBase, ts=Math.floor(fc/timeBase), ss=ts%60, mm=Math.floor(ts/60)%60, hh=Math.floor(ts/3600); return{hh,mm,ss,ff};
+        }
+        function handleConversion(){
+            const sf=formats[sourceFormatSelect.value], hh=clamp(parseInt(h_in.value,10)||0,0,99), mm=clamp(parseInt(m_in.value,10)||0,0,59), ss=clamp(parseInt(s_in.value,10)||0,0,59), ff=clamp(parseInt(f_in.value,10)||0,0,sf.timeBase-1);
+            const tf=formats[targetFormatSelect.value]; let sframes=timecodeToFrames(hh,mm,ss,ff,sf), tframes=sframes;
+            if(sf.rate!==tf.rate) tframes=sframes*(tf.rate/sf.rate);
+            const r=framesToTimecode(tframes,tf), sep=tf.isDf?';':':';
+            resultTitle.textContent=tf.name; resultTimecode.textContent=`${pad2(r.hh)}:${pad2(r.mm)}:${pad2(r.ss)}${sep}${pad2(r.ff)}`;
+            const tsec=(r.hh*3600)+(r.mm*60)+r.ss+(r.ff/tf.timeBase), tr=Math.round(tframes);
+            extraInfo.textContent=`(${tsec.toFixed(3)} 秒 / ${tr} F)`; resultWrapper.classList.remove('hidden'); saveSettings();
+        }
+        function copyResult(){ const t=resultTimecode.textContent; if(!t)return; navigator.clipboard.writeText(t).then(()=>{ copyFeedback.textContent='コピーしました！'; setTimeout(()=>{copyFeedback.textContent=''},1500); }); }
+
+        sourceFormatSelect.addEventListener('change',()=>{updateSourceUI();handleConversion();}); targetFormatSelect.addEventListener('change',handleConversion);
+        convertBtn.addEventListener('click',handleConversion); copyBtn.addEventListener('click',copyResult);
+        clearBtn.addEventListener('click',()=>{timeInputs.forEach(i=>i.value=''); resultWrapper.classList.add('hidden'); localStorage.removeItem('tcToolSettings');});
+        timeInputs.forEach(i=>{ i.addEventListener('input',(e)=>{if(e.target.value.length>2)e.target.value=e.target.value.slice(-2);handleConversion();}); i.addEventListener('keydown',(e)=>{if(e.key==='Enter'){e.preventDefault();handleConversion();}}); i.addEventListener('blur',formatInputOnBlur); });
+        loadSettings(); updateSourceUI(); if([h_in.value,m_in.value,s_in.value,f_in.value].some(v=>v&&v!==''))handleConversion();
+    }
+
+    // =======================================================
+    // ▼▼▼ 5. 電卓モード ▼▼▼
+    // =======================================================
+    function setupSimpleCalculator() {
+        const display=document.getElementById('calc-display'), history=document.getElementById('calc-history'), editToggle=document.getElementById('edit-toggle'), editCancel=document.getElementById('edit-cancel'), editError=document.getElementById('edit-error'), simpleContainer=document.getElementById('simple-calculator-container');
+        const TOKEN_REGEX=/^\d{1,3}(:\d{1,2}){0,2}$/; let currentInput='', currentExpression='', justCalculated=false, editing=false, exprBackup='';
+        function padToken(t){ const p=t.split(':').map(v=>v||'0'); if(p.length===1)return String(Number(p[0])); if(p.length===2)return `${Number(p[0])}:${String(Number(p[1])).padStart(2,'0')}`; if(p.length===3)return `${Number(p[0])}:${String(Number(p[1])).padStart(2,'0')}:${String(Number(p[2])).padStart(2,'0')}`; return t; }
+        function toSec(s){ const p=s.split(':').map(n=>Number(n||0)); let h=0,m=0,sc=0; if(p.length===3)[h,m,sc]=p; else if(p.length===2)[m,sc]=p; else [sc]=p; return h*3600+m*60+sc; }
+        function toTime(s){ const sg=s<0?'-':''; s=Math.abs(s); const h=String(Math.floor(s/3600)).padStart(2,'0'), m=String(Math.floor((s%3600)/60)).padStart(2,'0'), sc=String(s%60).padStart(2,'0'); return `${sg}${h}:${m}:${sc}`; }
+        function normalize(s){ return s.replace(/[＋﹢]/g,'+').replace(/[－﹣–—−]/g,'-').replace(/[：∶︰]/g,':').replace(/　/g,' ').replace(/([+\-])/g,' $1 ').replace(/\s+/g,' ').trim().split(' ').map(t=>(TOKEN_REGEX.test(t)?padToken(t):t)).join(' '); }
+        function validateToken(t){ if(!TOKEN_REGEX.test(t))return{ok:false,msg:`書式不正`}; const p=t.split(':').map(n=>Number(n||0)); if(p.length===2&&p[1]>59)return{ok:false,msg:`秒不正`}; if(p.length===3){if(p[1]>59)return{ok:false,msg:`分不正`};if(p[2]>59)return{ok:false,msg:`秒不正`};} return{ok:true}; }
+        function validateExpr(s){ const n=normalize(s); if(!n)return{ok:true,norm:'',msg:''}; const ts=n.split(' '); if(ts.length%2===0)return{ok:false,norm:n,msg:'演算子末尾'}; for(let i=0;i<ts.length;i++){ if(i%2===0){const v=validateToken(ts[i]);if(!v.ok)return{ok:false,norm:n,msg:v.msg};} else if(!['+','-'].includes(ts[i]))return{ok:false,norm:n,msg:'演算子エラー'}; } return{ok:true,norm:n}; }
+        function compute(s){ const ts=s.trim().split(/\s+/); let tot=toSec(ts[0]||'0'); for(let i=1;i<ts.length;i+=2){ const op=ts[i],v=toSec(ts[i+1]||'0'); if(op==='+')tot+=v; if(op==='-')tot-=v; } return tot; }
+        function update(){ display.textContent=currentInput||'00:00:00'; history.textContent=currentExpression; }
+        function addNum(n){ if(editing)return; editError.textContent=''; if(justCalculated){currentInput='';currentExpression='';justCalculated=false;} const nx=currentInput+n; if(!/^\d{0,3}(:\d{0,2}){0,2}$/.test(nx)){editError.textContent='桁数上限';return;} currentInput=nx; update(); }
+        function addCol(){ if(editing)return; editError.textContent=''; const c=(currentInput.match(/:/g)||[]).length; if(c<2){ if(currentInput===''&&c===0)currentInput='0:'; else currentInput+=':'; update(); } }
+        function addOp(op){ if(editing)return; if(justCalculated&&!currentInput){currentExpression=display.textContent+' '+op+' ';justCalculated=false;update();return;} if(!currentInput)return; const v=validateToken(currentInput); if(!v.ok){editError.textContent=v.msg;return;} editError.textContent=''; currentExpression+=padToken(currentInput)+' '+op+' '; currentInput=''; update(); }
+        function calc(){ if(editing)return applyEdit(); if(currentInput){const v=validateToken(currentInput);if(!v.ok){editError.textContent=v.msg;return;}} let ex=currentExpression; if(currentInput)ex+=padToken(currentInput); ex=normalize(ex); if(!ex)return; const v=validateExpr(ex); if(!v.ok){editError.textContent=v.msg;return;} const tot=compute(v.norm); const rs=toTime(tot); history.textContent=v.norm+' = '+rs; display.textContent=rs; currentExpression=v.norm+' '; currentInput=''; justCalculated=true; editError.textContent=''; }
+        function clear(){ if(editing)cancelEdit(); currentInput=''; currentExpression=''; justCalculated=false; editError.textContent=''; update(); }
+        function back(){ if(editing)return; editError.textContent=''; if(currentInput){currentInput=currentInput.slice(0,-1);update();} }
+        function setEdit(on){ editing=on; if(on){ exprBackup=history.textContent; history.contentEditable=true; history.classList.add('bg-white','dark:bg-gray-700','border','border-blue-400','rounded','px-2','py-1'); history.focus(); editToggle.textContent='適用'; editToggle.classList.replace('bg-blue-200','bg-green-200'); editToggle.classList.replace('text-blue-800','text-green-800'); editToggle.classList.replace('dark:bg-blue-900/50','dark:bg-green-900/50'); editToggle.classList.replace('dark:text-blue-300','dark:text-green-300'); editCancel.classList.remove('hidden'); editError.textContent=''; } else { history.contentEditable=false; history.classList.remove('bg-white','dark:bg-gray-700','border','border-blue-400','rounded','px-2','py-1'); editToggle.textContent='編集'; editToggle.classList.replace('bg-green-200','bg-blue-200'); editToggle.classList.replace('text-green-800','text-blue-800'); editToggle.classList.replace('dark:bg-green-900/50','dark:bg-blue-900/50'); editToggle.classList.replace('dark:text-green-300','dark:text-blue-300'); editCancel.classList.add('hidden'); } }
+        function applyEdit(){ const r=history.textContent; let ep=r; if(r.includes('='))ep=r.split('=')[0]; const v=validateExpr(ep); if(!v.ok){editError.textContent=v.msg;return;} currentExpression=v.norm+' '; currentInput=''; justCalculated=false; setEdit(false); calc(); }
+        function cancelEdit(){ history.textContent=exprBackup; setEdit(false); editError.textContent=''; }
+        
+        document.querySelectorAll('#simple-calculator-container [data-num]').forEach(b=>b.addEventListener('click',()=>addNum(b.dataset.num)));
+        document.getElementById('colon-btn').addEventListener('click',addCol);
+        document.querySelectorAll('#simple-calculator-container [data-op]').forEach(b=>b.addEventListener('click',()=>addOp(b.dataset.op)));
+        document.getElementById('equal-btn').addEventListener('click',calc); document.getElementById('clear-btn').addEventListener('click',clear); document.getElementById('backspace-btn').addEventListener('click',back);
+        editToggle.addEventListener('click',()=>{if(!editing){history.textContent=currentExpression.trim();setEdit(true);}else applyEdit();}); editCancel.addEventListener('click',cancelEdit);
+        history.addEventListener('keydown',e=>{if(!editing)return;if(e.key==='Enter'){e.preventDefault();applyEdit();}if(e.key==='Escape'){e.preventDefault();cancelEdit();}});
+        document.addEventListener('keydown',e=>{ if(simpleContainer.classList.contains('hidden'))return; if(e.target.closest('input, textarea, [contenteditable="true"]'))return; if(editing)return; if(e.key>='0'&&e.key<='9'){addNum(e.key);e.preventDefault();} else if(e.key===':'||e.key===';'){addCol();e.preventDefault();} else if(e.key==='+'){addOp('+');e.preventDefault();} else if(e.key==='-'){addOp('-');e.preventDefault();} else if(e.key==='Enter'||e.key==='='){calc();e.preventDefault();} else if(e.key==='Backspace'){back();e.preventDefault();} else if(e.key==='Escape'||e.key.toLowerCase()==='c'){clear();e.preventDefault();} });
+        update();
+    }
+
+    // =======================================================
+    // ▼▼▼ 6. 尺計算機モード ▼▼▼
+    // =======================================================
+    function setupShakuCalculator() {
+        const STORAGE_KEY='shaku_calculator_data_v1';
+        const timeInputsContainer=document.getElementById('time-inputs'), calculateBtn=document.getElementById('calculate-btn'), resetBtn=document.getElementById('reset-btn'), addRowBtn=document.getElementById('add-row-btn');
+        const targetH=document.getElementById('target-h-input'), targetM=document.getElementById('target-m-input'), targetS=document.getElementById('target-s-input');
+        const resultContainer=document.getElementById('result-container'), resultEl=document.getElementById('result'), diffSection=document.getElementById('difference-section'), diffResult=document.getElementById('difference-result');
+        let rowCounter=0, audioCtx, fireworksActive=false;
+        function initAudio(){ try{ if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state==='suspended')audioCtx.resume(); }catch(e){} }
+        function saveState(){ const t={h:targetH.value,m:targetM.value,s:targetS.value}, rows=[]; document.querySelectorAll('.time-row').forEach(r=>{ rows.push({content:r.querySelector('.content-input').value,h:r.querySelector('.h-input').value,m:r.querySelector('.m-input').value,s:r.querySelector('.s-input').value}); }); localStorage.setItem(STORAGE_KEY,JSON.stringify({target:t,rows})); }
+        function loadState(){ const d=localStorage.getItem(STORAGE_KEY); if(!d)return false; try{ const j=JSON.parse(d); targetH.value=j.target.h||''; targetM.value=j.target.m||''; targetS.value=j.target.s||''; timeInputsContainer.innerHTML=''; rowCounter=0; if(j.rows&&j.rows.length>0)j.rows.forEach(r=>addInputRow(r)); else for(let i=0;i<3;i++)addInputRow(); return true; }catch(_){return false;} }
+        function addInputRow(data=null){ rowCounter++; const r=document.createElement('div'); r.className='time-row grid grid-cols-1 sm:grid-cols-[auto_1fr_auto] gap-x-4 gap-y-2 items-center bg-white dark:bg-gray-800 p-3 rounded-lg shadow'; const c=data?data.content:'', h=data?data.h:'', m=data?data.m:'', s=data?data.s:''; r.innerHTML=`<span class="w-8 text-left sm:text-center font-medium text-gray-500 dark:text-gray-400">${rowCounter}.</span><div class="w-full"><input type="text" value="${c}" placeholder="内容" class="content-input w-full p-2 bg-gray-100 dark:bg-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"></div><div class="flex items-center gap-2"><input type="number" value="${h}" min="0" data-max="99" placeholder="H" class="h-input w-16 p-2 text-center bg-gray-100 dark:bg-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"><span class="font-bold text-gray-500 dark:text-gray-400">:</span><input type="number" value="${m}" min="0" max="59" data-max="59" placeholder="M" class="m-input w-16 p-2 text-center bg-gray-100 dark:bg-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"><span class="font-bold text-gray-500 dark:text-gray-400">:</span><input type="number" value="${s}" min="0" max="59" data-max="59" placeholder="S" class="s-input w-16 p-2 text-center bg-gray-100 dark:bg-gray-700 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"></div>`; timeInputsContainer.appendChild(r); }
+        function initialize(){ if(!loadState())for(let i=0;i<3;i++)addInputRow(); }
+        function reset(){ localStorage.removeItem(STORAGE_KEY); timeInputsContainer.innerHTML=''; rowCounter=0; for(let i=0;i<3;i++)addInputRow(); targetH.value=''; targetM.value=''; targetS.value=''; resultContainer.classList.add('hidden'); }
+        function val(v,max){ const m=max?parseInt(max,10):999; if(v===''||isNaN(v))return 0; return Math.min(Math.max(0,parseInt(v,10)),m); }
+        function fmt(h,m,s){ return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; }
+        function calc(){
+            let tot=0; document.querySelectorAll('.time-row').forEach(r=>{ const h=val(r.querySelector('.h-input').value,99), m=val(r.querySelector('.m-input').value,59), s=val(r.querySelector('.s-input').value,59); tot+=(h*3600)+(m*60)+s; });
+            resultEl.textContent=fmt(Math.floor(tot/3600),Math.floor((tot%3600)/60),tot%60);
+            const tgt=(val(targetH.value,99)*3600)+(val(targetM.value,59)*60)+val(targetS.value,59);
+            if(tgt>0){ const diff=tgt-tot, abs=Math.abs(diff), f=fmt(Math.floor(abs/3600),Math.floor((abs%3600)/60),abs%60); diffResult.classList.remove('text-red-500','text-blue-500'); if(diff<0){diffResult.textContent=`オーバー ${f}`;diffResult.classList.add('text-red-500');}else if(diff>0){diffResult.textContent=`不足 ${f}`;diffResult.classList.add('text-red-500');}else{diffResult.textContent="完尺";diffResult.classList.add('text-blue-500');fireworks();} diffSection.classList.remove('hidden'); } else diffSection.classList.add('hidden');
+            resultContainer.classList.remove('hidden');
+        }
+        function fireworks(){ if(fireworksActive)return; fireworksActive=true; const c=document.getElementById('fireworks-container'); let cnt=0; const i=setInterval(()=>{ if(cnt>10){clearInterval(i);fireworksActive=false;return;} createBurst(c,Math.random()*100,Math.random()*100); cnt++; },300); }
+        function createBurst(c,x,y){ const cols=['#ff595e','#ffca3a','#8ac926','#1982c4','#6a4c93']; for(let i=0;i<30;i++){ const p=document.createElement('div'); p.className='confetti '+(Math.random()>.5?'circle':'rect'); p.style.backgroundColor=cols[Math.floor(Math.random()*cols.length)]; p.style.left=x+'%'; p.style.top=y+'%'; const a=Math.random()*360, v=50+Math.random()*100; p.style.setProperty('--x',(Math.cos(a*Math.PI/180)*v)+'px'); p.style.setProperty('--y',(Math.sin(a*Math.PI/180)*v)+'px'); c.appendChild(p); setTimeout(()=>p.remove(),2500); } }
+        
+        initialize(); addRowBtn.addEventListener('click',()=>{addInputRow();saveState();}); calculateBtn.addEventListener('click',()=>{initAudio();calc();}); resetBtn.addEventListener('click',reset); document.getElementById('shaku-calculator-container').addEventListener('input',e=>{if(e.target.tagName==='INPUT')saveState();});
+    }
+    </script>
+</body>
+</html>
