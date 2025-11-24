@@ -692,7 +692,7 @@
                 尺電卓
             </button>
             <button id="mode-shaku" class="mode-tab px-4 py-3 font-semibold border-b-2 border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors whitespace-nowrap">
-                Ｑシート風尺計算
+                簡易Qシートエディタ
             </button>
         </div>
 
@@ -1083,7 +1083,7 @@
                 case 'aspect': appDescription.textContent = '解像度とアスペクト比を相互に計算します。'; break;
                 case 'tc': appDescription.textContent = '異なるフレームレートのタイムコードを相互に変換します。'; break;
                 case 'simple': appDescription.textContent = 'タイムコード計算専用の電卓です。'; break;
-                case 'shaku': appDescription.textContent = '複数のタイムコードを合計し、目標尺との差を計算します。'; break;
+                case 'shaku': appDescription.textContent = '尺の自動計算、提供ベース管理、PDF出力が出来ます。'; break;
             }
         }
 
@@ -1410,7 +1410,7 @@
                 // --- DOM生成 ---
                 const div = document.createElement('div');
                 div.className = 'ladder-row';
-                div.setAttribute('draggable', 'true');
+                // div.setAttribute('draggable', 'true'); // 削除: ドラッグ無効化
                 div.dataset.index = index;
 
                 // ★ 左側のメイン時刻欄の生成（横線を追加）
@@ -1513,7 +1513,6 @@
                                 <input type="text" class="content-input" value="${row.content}" placeholder="内容 (R1, CM...)">
                             </div>
                             <div class="row-controls">
-                                 <div class="drag-handle p-1 bg-gray-100 dark:bg-gray-700 rounded cursor-grab text-gray-500 hover:text-blue-500">≡ 並替</div>
                                  <button class="delete-btn p-1 bg-red-100 dark:bg-red-900 rounded text-red-500 hover:text-red-700">🗑 削除</button>
                                  <button class="toggle-bar-btn ${row.barEnabled ? 'active' : 'inactive'}">
                                     ${row.barEnabled ? '❚ 帯ON' : '❚ 帯OFF'}
@@ -1673,31 +1672,9 @@
                 }
 
                 div.querySelector('.delete-btn').addEventListener('click', () => deleteRow(index));
-                div.addEventListener('dragstart', (e) => {
-                    if (!e.target.closest('.drag-handle')) { e.preventDefault(); return; }
-                    div.classList.add('dragging');
-                    e.dataTransfer.effectAllowed = 'move';
-                    e.dataTransfer.setData('text/plain', index);
-                });
-                div.addEventListener('dragend', () => { div.classList.remove('dragging'); });
-                div.addEventListener('dragover', (e) => {
-                    e.preventDefault();
-                    const draggingEl = container.querySelector('.dragging');
-                    if(draggingEl && draggingEl !== div) {
-                        const box = div.getBoundingClientRect();
-                        const offset = e.clientY - box.top - (box.height / 2);
-                        if(offset < 0) container.insertBefore(draggingEl, div);
-                        else container.insertBefore(draggingEl, div.nextSibling);
-                    }
-                });
+                // ドラッグ関連のイベントリスナー（dragstart, dragend, dragover）は全て削除しました
 
                 currentTotalSec += rowDurSec;
-            });
-
-            container.addEventListener('dragend', () => {
-                 const newOrder = [];
-                 container.querySelectorAll('.ladder-row').forEach(el => { newOrder.push(rowsData[parseInt(el.dataset.index)]); });
-                 rowsData = newOrder; renderAll(); saveState();
             });
 
             // --- 終了線と終了時刻エリア ---
