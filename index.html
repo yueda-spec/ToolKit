@@ -1756,16 +1756,63 @@
             }
         }
 
-        if (!loadState()) addRowData(); 
+        // 保存データがない場合の初期化処理
+        if (!loadState()) {
+            startTcInput.value = "00:58:15";
+            rowsData = [];
+            
+            // 1行目: CB (1分30秒)
+            rowsData.push({
+                id: Date.now() + Math.random(),
+                content: "CB",
+                h: 0, m: 1, s: 30,
+                tb: { enabled: false, s: 10 },
+                barEnabled: false 
+            });
+
+            // 2行目: クレジット (15秒)
+            rowsData.push({
+                id: Date.now() + Math.random() + 1,
+                content: "クレジット",
+                h: 0, m: 0, s: 15,
+                tb: { enabled: false, s: 10 },
+                barEnabled: false 
+            });
+
+            renderAll();
+            saveState();
+        }
 
         addRowBtn.addEventListener('click', addRowData);
         resetBtn.addEventListener('click', () => {
             if(confirm("全てリセットしますか？")) {
                 localStorage.removeItem(STORAGE_KEY);
+                // 配列を空にする
                 rowsData = [];
-                startTcInput.value = "010000"; 
+                // 開始TCを 00:58:15 に設定
+                startTcInput.value = "00:58:15"; 
                 titleInput.value = "";
-                addRowData();
+                
+                // 1行目: CB (1分30秒)
+                rowsData.push({
+                    id: Date.now() + Math.random(),
+                    content: "CB",
+                    h: 0, m: 1, s: 30,
+                    tb: { enabled: false, s: 10 },
+                    barEnabled: false 
+                });
+
+                // 2行目: クレジット (15秒)
+                rowsData.push({
+                    id: Date.now() + Math.random() + 1,
+                    content: "クレジット",
+                    h: 0, m: 0, s: 15,
+                    tb: { enabled: false, s: 10 },
+                    barEnabled: false 
+                });
+
+                renderAll();
+                saveState();
             }
         });
         startTcInput.addEventListener('focus', () => {
