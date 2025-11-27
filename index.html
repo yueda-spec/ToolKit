@@ -1330,12 +1330,42 @@
             return timeToSec(h,m,s);
         }
 
-        // --- 状態の保存と読み込み ---
-        function saveState() {
+        // --- データ構造定義（新規追加） ---
+        // 行データの初期値生成ファクトリ：常に完全なオブジェクトを返します
+        function createRow(content = "", h = 0, m = 0, s = 0) {
+            return {
+                id: Date.now() + Math.random(),
+                content: content,
+                h: h, m: m, s: s,
+                // tbは常にオブジェクトとして存在させ、中身も初期化する
+                tb: { enabled: false, s: 10, offset: 0 }, 
+                barEnabled: true
+            };
+        }
+
+        // データを読み込む際に、足りないプロパティを初期値で埋める（データ修復）
+        function sanitizeRow(row) {
+            const defaultRow = createRow();
+            return {
+                ...defaultRow,        // 基本設定
+                ...row,               // 保存されていた設定で上書き
+                tb: { ...defaultRow.tb, ...(row.tb || {}) } // tbの中身もマージ
+            };
+        }
+
+        // --- 状態の保存と読み込み（デバウンス対応版） ---
+        let saveTimer;
+
+        function performSave() {
             const startTc = startTcInput.value;
             const title = titleInput.value;
             localStorage.setItem(STORAGE_KEY, JSON.stringify({ startTc, title, rows: rowsData }));
             updatePrintHeader();
+        }
+
+        function saveState() {
+            if (saveTimer) clearTimeout(saveTimer);
+            saveTimer = setTimeout(performSave, 500);
         }
 
         function loadState() {
@@ -1345,7 +1375,11 @@
                 const data = JSON.parse(json);
                 startTcInput.value = data.startTc || "01:00:00";
                 titleInput.value = data.title || "";
-                rowsData = data.rows || [];
+                
+                // ★重要: 読み込み時に全行をサニタイズ（不足データを補完）
+                // これにより、renderAll側での「||」チェックが不要になります
+                rowsData = (data.rows || []).map(sanitizeRow);
+                
                 if (rowsData.length === 0) addRowData(); 
                 renderAll();
                 return true;
@@ -1360,13 +1394,7 @@
 
         // --- データ操作 ---
         function addRowData() {
-            rowsData.push({
-                id: Date.now() + Math.random(),
-                content: "",
-                h: 0, m: 0, s: 0,
-                tb: { enabled: false, s: 10 },
-                barEnabled: true 
-            });
+            rowsData.push(createRow()); // ★ファクトリ関数を使用
             renderAll();
             saveState();
         }
@@ -1377,39 +1405,175 @@
             saveState();
         }
 
+        // --- ▼▼▼ 新規追加: イベントデリゲーション用関数 ▼▼▼ ---
+        function setupDelegatedEvents() {
+            // 1. クリック系の処理（削除、帯ON/OFF、TB追加/削除）
+            container.addEventListener('click', (e) => {
+                const target = e.target;
+                const rowEl = target.closest('.ladder-row');
+                if (!rowEl) return; // 行外のクリックは無視
+                
+                const index = parseInt(rowEl.dataset.index);
+                const row = rowsData[index];
+
+                // 削除ボタン
+                if (target.closest('.delete-btn')) {
+                    deleteRow(index);
+                }
+                // 帯ON/OFFボタン
+                else if (target.closest('.toggle-bar-btn')) {
+                    row.barEnabled = !row.barEnabled;
+                    saveState(); renderAll();
+                }
+                // 提供ベース追加
+                else if (target.closest('.tb-add-btn')) {
+                    if (!row.tb) row.tb = { s: 10 };
+                    row.tb.enabled = true;
+                    // デフォルトで後ろ10秒に配置
+                    const cDur = timeToSec(row.h, row.m, row.s);
+                    row.tb.offset = Math.max(0, cDur - 10);
+                    renderAll(); saveState();
+                }
+                // 提供ベース削除
+                else if (target.closest('.tb-remove-btn')) {
+                    row.tb.enabled = false;
+                    renderAll(); saveState();
+                }
+            });
+
+            // 2. 入力系の処理（テキスト内容、DUR、TB秒数）
+            container.addEventListener('input', (e) => {
+                const target = e.target;
+                const rowEl = target.closest('.ladder-row');
+                if (!rowEl) return;
+                
+                const index = parseInt(rowEl.dataset.index);
+                const row = rowsData[index];
+
+                if (target.classList.contains('content-input')) {
+                    row.content = target.value;
+                    saveState(); // デバウンスが効くので安心
+                } else if (target.classList.contains('row-m')) {
+                    row.m = parseInt(target.value) || 0;
+                    saveState();
+                } else if (target.classList.contains('row-s')) {
+                    row.s = parseInt(target.value) || 0;
+                    saveState();
+                } else if (target.classList.contains('tb-dur-s')) {
+                    row.tb.s = parseInt(target.value) || 0;
+                    saveState();
+                }
+            });
+
+            // DUR入力などでエンターキーを押した時のフォーカス外し
+            container.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && (e.target.tagName === 'INPUT')) {
+                    e.target.blur();
+                }
+            });
+
+            // 3. 時刻入力の処理（フォーカス時:生数字、Blur時:計算）
+            container.addEventListener('focusin', (e) => {
+                if (e.target.dataset.raw) {
+                    e.target.value = e.target.dataset.raw;
+                    e.target.select();
+                }
+            });
+
+            container.addEventListener('focusout', (e) => {
+                const target = e.target;
+                // 時刻入力欄以外なら無視
+                if (!target.classList.contains('time-input-display') && 
+                    !target.classList.contains('tb-time-input')) return;
+
+                const rowEl = target.closest('.ladder-row');
+                if (!rowEl) return;
+                
+                const index = parseInt(rowEl.dataset.index);
+                const row = rowsData[index];
+                const newSec = parseTimeInput(target.value); // 入力値を秒に変換
+
+                // 現在のこの行の開始時刻（計算用）
+                // ※DOM上のdata-rawは編集前の値なので、再計算が必要
+                let currentStartSec = parseTimeInput(startTcInput.value);
+                for(let i=0; i<index; i++) {
+                    currentStartSec += timeToSec(rowsData[i].h, rowsData[i].m, rowsData[i].s);
+                }
+
+                // クラス名でどの入力欄か判定してロジック分岐
+                if (target.classList.contains('row-start-tc')) {
+                    // 本編開始時刻の変更 → 前の行のDURを伸縮させる
+                    if (index === 0) {
+                        startTcInput.value = formatRawTime(newSec);
+                    } else {
+                        const prevRow = rowsData[index - 1];
+                        // 前の行の開始時刻
+                        let prevStartSec = currentStartSec - timeToSec(prevRow.h, prevRow.m, prevRow.s);
+                        let newPrevDur = newSec - prevStartSec;
+                        if (newPrevDur < 0) newPrevDur = 0;
+                        const t = secToTime(newPrevDur);
+                        prevRow.h = t.h; prevRow.m = t.m; prevRow.s = t.s;
+                    }
+                } else if (target.classList.contains('tb-start-swap')) {
+                    // 統合TB開始の変更 → この行のTBオフセットを変更
+                    let newOffset = newSec - currentStartSec;
+                    if (newOffset < 0) newOffset = 0;
+                    row.tb.offset = newOffset;
+                } else if (target.classList.contains('tb-prev-end-swap')) {
+                    // 統合前TB終了の変更 → 前の行のTB長さを変更
+                    if (index > 0) {
+                        const prevRow = rowsData[index - 1];
+                        // 前の行の開始時刻再計算が必要
+                        let prevStartSec = currentStartSec - timeToSec(prevRow.h, prevRow.m, prevRow.s);
+                        let prevTbStart = prevStartSec + (prevRow.tb.offset || 0);
+                        let newTbDur = newSec - prevTbStart;
+                        if (newTbDur < 0) newTbDur = 0;
+                        prevRow.tb.s = newTbDur;
+                    }
+                } else if (target.classList.contains('tb-start-tc')) {
+                    // フロートTB開始 → オフセット変更
+                    row.tb.offset = newSec - currentStartSec;
+                } else if (target.classList.contains('tb-end-tc')) {
+                    // フロートTB終了 → TB長さ変更
+                    const currentTbStart = currentStartSec + (row.tb.offset || 0);
+                    let newDur = newSec - currentTbStart;
+                    if (newDur < 0) newDur = 0;
+                    row.tb.s = newDur;
+                }
+
+                renderAll(); saveState();
+            });
+        }
+        // --- ▲▲▲ イベントデリゲーション用関数 ここまで ▲▲▲ ---
+
         // --- 描画とイベント ---
+        // --- 描画（クリーンアップ版） ---
         function renderAll() {
             container.innerHTML = '';
             let currentTotalSec = parseTimeInput(startTcInput.value);
 
             rowsData.forEach((row, index) => {
-                if (row.barEnabled === undefined) row.barEnabled = true;
+                // row.barEnabledのチェック不要（必ずあるため）
 
                 const rowDurSec = timeToSec(row.h, row.m, row.s);
-                
-                // ★重要：この行の開始時刻を定数として保存
                 const thisRowStartSec = currentTotalSec;
-                const rowEndSec = thisRowStartSec + rowDurSec;
 
                 // --- 提供ベース計算 ---
-                const tbDur = (row.tb && row.tb.enabled) ? timeToSec(0, 0, row.tb.s || 0) : 0;
+                // row.tbは必ず存在するのでチェック不要。enabledを見るだけでOK
+                const tbDur = row.tb.enabled ? timeToSec(0, 0, row.tb.s) : 0;
                 
-                // 判定：TB開始がロール開始と一致しているか
-                const isTbStartMatch = (row.tb && row.tb.enabled && (row.tb.offset || 0) <= 0.1);
-
-                // 判定：TB終了がロール終了と一致しているか
-                const isTbEndMatch = (row.tb && row.tb.enabled && Math.abs(((row.tb.offset || 0) + tbDur) - rowDurSec) <= 0.1);
-
-                // 判定：前の行のTB終了が、この行の開始と一致しているか
+                // 判定ロジック（|| 0 などの防御コードを削除）
+                const isTbStartMatch = (row.tb.enabled && row.tb.offset <= 0.1);
+                const isTbEndMatch = (row.tb.enabled && Math.abs((row.tb.offset + tbDur) - rowDurSec) <= 0.1);
+                
                 let isPrevTbEndMatch = false;
                 let prevTbEndSec = 0;
                 if (index > 0) {
                     const prevRow = rowsData[index - 1];
-                    if (prevRow.tb && prevRow.tb.enabled) {
+                    if (prevRow.tb.enabled) {
                         const prevRowStart = thisRowStartSec - timeToSec(prevRow.h, prevRow.m, prevRow.s);
-                        const prevTbDur = timeToSec(0, 0, prevRow.tb.s || 0);
-                        const prevTbEnd = prevRowStart + (prevRow.tb.offset || 0) + prevTbDur;
-                        
+                        const prevTbDur = timeToSec(0, 0, prevRow.tb.s);
+                        const prevTbEnd = prevRowStart + prevRow.tb.offset + prevTbDur;
                         if (Math.abs(prevTbEnd - thisRowStartSec) <= 0.1) {
                             isPrevTbEndMatch = true;
                             prevTbEndSec = prevTbEnd;
@@ -1420,103 +1584,76 @@
                 // --- DOM生成 ---
                 const div = document.createElement('div');
                 div.className = 'ladder-row';
-                // div.setAttribute('draggable', 'true'); // 削除: ドラッグ無効化
                 div.dataset.index = index;
 
-                // ★ 左側のメイン時刻欄の生成（横線を追加）
+                // 左側のメイン時刻欄
                 let mainInputHtml = "";
                 let tbLabelHtml = "";
 
                 if (isTbStartMatch) {
-                    // パターン1: TB開始と一致（緑色入力欄 + 緑線）
-                    const tbStart = thisRowStartSec + (row.tb.offset || 0);
+                    const tbStart = thisRowStartSec + row.tb.offset;
                     mainInputHtml = `
                         <input type="text" class="time-input-display is-tb-match tb-start-swap" value="${formatTimeCode(tbStart)}" data-raw="${formatRawTime(tbStart)}" inputmode="numeric">
                         <div class="tb-connector-line main-connector-line line-green"></div>`;
                     tbLabelHtml = `<div class="tb-label-overlay">提供ベース</div>`;
-
                 } else if (isPrevTbEndMatch) {
-                    // パターン2: 前TB終了と一致（緑色入力欄 + 緑線）
                     mainInputHtml = `
                         <input type="text" class="time-input-display is-tb-match tb-prev-end-swap" value="${formatTimeCode(prevTbEndSec)}" data-raw="${formatRawTime(prevTbEndSec)}" inputmode="numeric">
                         <div class="tb-connector-line main-connector-line line-green"></div>`;
-                    
                 } else {
-                    // パターン3: 通常の本編時刻（黒色入力欄 + 黒線）
                     mainInputHtml = `
                         <input type="text" class="time-input-display row-start-tc" value="${formatTimeCode(thisRowStartSec)}" data-raw="${formatRawTime(thisRowStartSec)}" inputmode="numeric">
                         <div class="tb-connector-line main-connector-line"></div>`;
                 }
 
-
-                // --- 右側(フロートTB)のHTML生成 ---
+                // 右側(フロートTB)
                 let tbTimeHtml = ""; 
                 let tbInputHtml = ""; 
 
-                if (row.tb && row.tb.enabled) {
-                     const offsetVal = row.tb.offset || 0;
-                     if (offsetVal < 0) row.tb.offset = 0;
-                     if (offsetVal + tbDur > rowDurSec) row.tb.offset = Math.max(0, rowDurSec - tbDur);
+                if (row.tb.enabled) {
+                     // オフセット調整
+                     if (row.tb.offset < 0) row.tb.offset = 0;
+                     if (row.tb.offset + tbDur > rowDurSec) row.tb.offset = Math.max(0, rowDurSec - tbDur);
                      
                      let tbStart = thisRowStartSec + row.tb.offset;
                      let tbEnd = tbStart + tbDur;
-
                      let posClass = "pos-middle";
                      if (row.tb.offset <= 1) posClass = "pos-head";
                      else if (Math.abs(row.tb.offset + tbDur - rowDurSec) <= 1) posClass = "pos-tail";
 
-                     // フロート表示は常に「提供ベース」なので line-green クラスをつける
                      const startInputHtml = isTbStartMatch ? '' : `
                         <div class="tb-time-row-inner">
                             <span class="tb-float-label">提供ベース</span>
                             <input type="text" class="tb-time-input tb-start-tc" value="${formatTimeCode(tbStart)}" data-raw="${formatRawTime(tbStart)}" inputmode="numeric">
                             <div class="tb-connector-line line-green"></div>
-                        </div>
-                     `;
+                        </div>`;
 
                      const endInputHtml = isTbEndMatch ? '' : `
                         <div class="tb-time-row-inner">
                             <input type="text" class="tb-time-input tb-end-tc" value="${formatTimeCode(tbEnd)}" data-raw="${formatRawTime(tbEnd)}" inputmode="numeric">
                             <div class="tb-connector-line line-green"></div>
-                        </div>
-                     `;
+                        </div>`;
 
                      if (startInputHtml || endInputHtml) {
-                         tbTimeHtml = `
-                            <div class="tb-time-group ${posClass}">
-                                 ${startInputHtml}
-                                 ${endInputHtml}
-                            </div>
-                         `;
+                         tbTimeHtml = `<div class="tb-time-group ${posClass}">${startInputHtml}${endInputHtml}</div>`;
                      }
 
                      tbInputHtml = `
                         <div class="tb-wrapper ${posClass}">
                             <div class="tb-input-row">
                                 <span class="tb-label">提供ベース:</span>
-                                <input type="number" class="dur-input tb-dur-s" value="${row.tb.s||0}" placeholder="秒">
+                                <input type="number" class="dur-input tb-dur-s" value="${row.tb.s}" placeholder="秒">
                                 <span class="tb-text text-xs mr-2">秒</span>
                                 <button class="tb-remove-btn ml-2 text-gray-400 hover:text-red-500" title="削除">×</button>
                             </div>
-                        </div>
-                     `;
+                        </div>`;
                 } else {
-                    tbInputHtml = `
-                        <div class="tb-add-btn">+ 提供ベース</div>
-                    `;
+                    tbInputHtml = `<div class="tb-add-btn">+ 提供ベース</div>`;
                 }
 
                 div.innerHTML = `
-                    <div class="ladder-time-box">
-                        ${tbLabelHtml}
-                        ${mainInputHtml} 
-                        ${tbTimeHtml} 
-                    </div>
-
-                    <div class="visual-bar-container">
-                        <div class="visual-bar ${row.barEnabled ? '' : 'hidden'}"></div>
-                    </div>
-
+                    <div class="ladder-time-box">${tbLabelHtml}${mainInputHtml}${tbTimeHtml}</div>
+                    <div class="visual-bar-container"><div class="visual-bar ${row.barEnabled ? '' : 'hidden'}"></div></div>
                     <div class="ladder-content">
                         <div class="content-lane-main">
                             <div class="content-row-main">
@@ -1524,171 +1661,25 @@
                             </div>
                             <div class="row-controls">
                                  <span class="drag-handle text-gray-400 hover:text-gray-600 cursor-grab mr-2 pt-1" title="並び替え">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16" />
-                                    </svg>
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16" /></svg>
                                  </span>
                                  <button class="delete-btn p-1 bg-red-100 dark:bg-red-900 rounded text-red-500 hover:text-red-700">🗑 削除</button>
-                                 <button class="toggle-bar-btn ${row.barEnabled ? 'active' : 'inactive'}">
-                                    ${row.barEnabled ? '❚ 帯ON' : '❚ 帯OFF'}
-                                 </button>
+                                 <button class="toggle-bar-btn ${row.barEnabled ? 'active' : 'inactive'}">${row.barEnabled ? '❚ 帯ON' : '❚ 帯OFF'}</button>
                             </div>
                         </div>
-                        <div class="content-lane-sub">
-                            ${tbInputHtml}
-                        </div>
+                        <div class="content-lane-sub">${tbInputHtml}</div>
                     </div>
-
                     <div class="ladder-duration-box">
                         <div class="duration-input-group">
                             <span class="text-xs mr-1 font-bold text-gray-400">DUR:</span>
-                            <input type="number" class="dur-input row-m" value="${row.m||0}" placeholder="M">
+                            <input type="number" class="dur-input row-m" value="${row.m}" placeholder="M">
                             <span>:</span>
-                            <input type="number" class="dur-input row-s" value="${row.s||0}" placeholder="S">
+                            <input type="number" class="dur-input row-s" value="${row.s}" placeholder="S">
                         </div>
                     </div>
                 `;
 
                 container.appendChild(div);
-
-                // --- イベントリスナー設定 ---
-                const setupTimeInput = (inputEl, callback) => {
-                    if(!inputEl) return;
-                    inputEl.addEventListener('focus', () => {
-                        inputEl.value = inputEl.dataset.raw;
-                        inputEl.select();
-                    });
-                    inputEl.addEventListener('blur', () => {
-                        const val = inputEl.value;
-                        const sec = parseTimeInput(val);
-                        inputEl.value = formatTimeCode(sec);
-                        inputEl.dataset.raw = formatRawTime(sec);
-                        if (callback) callback(sec);
-                    });
-                    inputEl.addEventListener('keydown', (e) => {
-                        if(e.key === 'Enter') inputEl.blur();
-                    });
-                    inputEl.addEventListener('mousedown', (e) => e.stopPropagation());
-                };
-
-                const contentIn = div.querySelector('.content-input');
-                const mIn = div.querySelector('.row-m');
-                const sIn = div.querySelector('.row-s');
-                
-                const rowStartInput = div.querySelector('.row-start-tc');
-                const tbStartSwapInput = div.querySelector('.tb-start-swap');
-                const tbPrevEndSwapInput = div.querySelector('.tb-prev-end-swap');
-
-                const tbAddBtn = div.querySelector('.tb-add-btn');
-                const tbRemoveBtn = div.querySelector('.tb-remove-btn');
-                const tbDurInput = div.querySelector('.tb-dur-s');
-                const tbStartInput = div.querySelector('.tb-start-tc');
-                const tbEndInput = div.querySelector('.tb-end-tc');
-                const toggleBarBtn = div.querySelector('.toggle-bar-btn');
-
-                // --- 基本リスナー ---
-                toggleBarBtn.addEventListener('click', () => {
-                    row.barEnabled = !row.barEnabled; saveState(); renderAll(); 
-                });
-                if(tbAddBtn) tbAddBtn.addEventListener('click', () => { 
-                    if(!row.tb) row.tb = { s:10 }; 
-                    row.tb.enabled = true; 
-                    const cDur = timeToSec(row.h, row.m, row.s);
-                    row.tb.offset = Math.max(0, cDur - 10);
-                    renderAll(); saveState(); 
-                });
-                if(tbRemoveBtn) tbRemoveBtn.addEventListener('click', () => { 
-                    row.tb.enabled = false; renderAll(); saveState(); 
-                });
-
-                // DUR入力欄エンター対応
-                [contentIn, mIn, sIn].forEach(el => {
-                    if(!el) return;
-                    el.addEventListener('input', () => {
-                         row.content = contentIn.value;
-                         row.h = 0; row.m = parseInt(mIn.value)||0; row.s = parseInt(sIn.value)||0;
-                         saveState();
-                    });
-                    el.addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter') el.blur();
-                    });
-                    el.addEventListener('blur', renderAll);
-                    el.addEventListener('mousedown', (e) => e.stopPropagation());
-                });
-
-                if(tbDurInput) {
-                    tbDurInput.addEventListener('input', () => {
-                        row.tb.s = parseInt(tbDurInput.value)||0; saveState();
-                    });
-                    tbDurInput.addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter') tbDurInput.blur();
-                    });
-                    tbDurInput.addEventListener('blur', renderAll);
-                    tbDurInput.addEventListener('mousedown', (e) => e.stopPropagation());
-                }
-
-                // --- 時刻操作リスナー ---
-                
-                // 1. 通常の本編開始時刻
-                if (rowStartInput) {
-                    setupTimeInput(rowStartInput, (newSec) => {
-                        if (index === 0) {
-                            startTcInput.value = formatRawTime(newSec);
-                        } else {
-                            const prevRow = rowsData[index - 1];
-                            const prevStartSec = thisRowStartSec - timeToSec(prevRow.h, prevRow.m, prevRow.s);
-                            let newPrevDur = newSec - prevStartSec;
-                            if(newPrevDur < 0) newPrevDur = 0;
-                            const t = secToTime(newPrevDur);
-                            prevRow.h = t.h; prevRow.m = t.m; prevRow.s = t.s;
-                        }
-                        renderAll(); saveState();
-                    });
-                }
-
-                // 2. 統合されたTB開始時刻
-                if (tbStartSwapInput) {
-                    setupTimeInput(tbStartSwapInput, (newSec) => {
-                        let newOffset = newSec - thisRowStartSec;
-                        if (newOffset < 0) newOffset = 0;
-                        row.tb.offset = newOffset;
-                        renderAll(); saveState();
-                    });
-                }
-
-                // 3. 統合された前TB終了時刻
-                if (tbPrevEndSwapInput) {
-                    setupTimeInput(tbPrevEndSwapInput, (newSec) => {
-                        const prevRow = rowsData[index - 1];
-                        const prevRowStart = thisRowStartSec - timeToSec(prevRow.h, prevRow.m, prevRow.s);
-                        const prevTbStart = prevRowStart + (prevRow.tb.offset || 0);
-                        let newTbDur = newSec - prevTbStart;
-                        if (newTbDur < 0) newTbDur = 0;
-                        prevRow.tb.s = newTbDur;
-                        renderAll(); saveState();
-                    });
-                }
-
-                // 4. フロートTB開始/終了
-                if (tbStartInput) {
-                    setupTimeInput(tbStartInput, (newSec) => {
-                        row.tb.offset = newSec - thisRowStartSec;
-                        renderAll(); saveState();
-                    });
-                }
-                if (tbEndInput) {
-                    setupTimeInput(tbEndInput, (newSec) => {
-                        const currentTbStart = thisRowStartSec + (row.tb.offset || 0);
-                        let newDur = newSec - currentTbStart;
-                        if (newDur < 0) newDur = 0;
-                        row.tb.s = newDur;
-                        renderAll(); saveState();
-                    });
-                }
-
-                div.querySelector('.delete-btn').addEventListener('click', () => deleteRow(index));
-                // ドラッグ関連のイベントリスナー（dragstart, dragend, dragover）は全て削除しました
-
                 currentTotalSec += rowDurSec;
             });
 
@@ -1696,66 +1687,50 @@
             const oldBottom = document.querySelector('.ladder-bottom-area');
             if(oldBottom) oldBottom.remove();
             
-            // 最後の行のTB終了チェック
             let isLastRowTbEndMatch = false;
             let lastTbEndSec = 0;
             if (rowsData.length > 0) {
                 const lastRow = rowsData[rowsData.length - 1];
-                if (lastRow.tb && lastRow.tb.enabled) {
+                // ここもシンプルに
+                if (lastRow.tb.enabled) {
                     const lastRowDur = timeToSec(lastRow.h, lastRow.m, lastRow.s);
-                    const lastTbDur = timeToSec(0, 0, lastRow.tb.s || 0);
-                    if (Math.abs(((lastRow.tb.offset || 0) + lastTbDur) - lastRowDur) <= 0.1) {
+                    const lastTbDur = timeToSec(0, 0, lastRow.tb.s);
+                    if (Math.abs((lastRow.tb.offset + lastTbDur) - lastRowDur) <= 0.1) {
                         isLastRowTbEndMatch = true;
                         const lastRowStart = currentTotalSec - lastRowDur;
-                        lastTbEndSec = lastRowStart + (lastRow.tb.offset || 0) + lastTbDur;
+                        lastTbEndSec = lastRowStart + lastRow.tb.offset + lastTbDur;
                     }
                 }
             }
             
-            // ★ 最後尾の入力欄にも線を追加
             let bottomInputHtml = "";
             if (isLastRowTbEndMatch) {
-                // 提供ベース終了と一致（緑線）
                 bottomInputHtml = `
                     <input type="text" id="total-end-tc" class="end-time-input is-tb-match tb-last-end-swap" value="${formatTimeCode(lastTbEndSec)}" data-raw="${formatRawTime(lastTbEndSec)}" inputmode="numeric">
-                    <div class="tb-connector-line main-connector-line line-green" style="right: -130px; top: 0;"></div>
-                `;
+                    <div class="tb-connector-line main-connector-line line-green" style="right: -130px; top: 0;"></div>`;
             } else {
-                // 通常終了（黒線）
                 bottomInputHtml = `
                     <input type="text" id="total-end-tc" class="end-time-input" value="${formatTimeCode(currentTotalSec)}" data-raw="${formatRawTime(currentTotalSec)}" inputmode="numeric">
-                    <div class="tb-connector-line main-connector-line" style="right: -130px; top: 0;"></div>
-                `;
+                    <div class="tb-connector-line main-connector-line" style="right: -130px; top: 0;"></div>`;
             }
 
             const bottomDiv = document.createElement('div');
             bottomDiv.className = 'ladder-bottom-area';
             bottomDiv.innerHTML = bottomInputHtml;
-            
             container.parentNode.insertBefore(bottomDiv, container.nextSibling);
 
-            const setupEndTimeInput = (inputEl, callback) => {
-                 if(!inputEl) return;
-                 inputEl.addEventListener('focus', () => { inputEl.value = inputEl.dataset.raw; inputEl.select(); });
-                 inputEl.addEventListener('blur', () => {
-                     const sec = parseTimeInput(inputEl.value);
-                     inputEl.value = formatTimeCode(sec);
-                     inputEl.dataset.raw = formatRawTime(sec);
-                     if(callback) callback(sec);
-                 });
-                 inputEl.addEventListener('keydown', (e) => { if(e.key==='Enter') inputEl.blur(); });
-                 inputEl.addEventListener('mousedown', (e) => e.stopPropagation());
-            };
-
+            // 終了時刻のイベントリスナー（デリゲーション対象外のため個別設定）
             const endTcIn = document.getElementById('total-end-tc');
             if (endTcIn) {
-                setupEndTimeInput(endTcIn, (newEndSec) => {
-                    if (rowsData.length > 0) {
+                endTcIn.addEventListener('focus', () => { endTcIn.value = endTcIn.dataset.raw; endTcIn.select(); });
+                endTcIn.addEventListener('keydown', (e) => { if(e.key==='Enter') endTcIn.blur(); });
+                endTcIn.addEventListener('blur', () => {
+                     const newEndSec = parseTimeInput(endTcIn.value);
+                     if (rowsData.length > 0) {
                         const lastRow = rowsData[rowsData.length - 1];
                         const lastRowStart = currentTotalSec - timeToSec(lastRow.h, lastRow.m, lastRow.s);
-                        
                         if (endTcIn.classList.contains('tb-last-end-swap')) {
-                            const lastTbStart = lastRowStart + (lastRow.tb.offset || 0);
+                            const lastTbStart = lastRowStart + lastRow.tb.offset;
                             let newTbDur = newEndSec - lastTbStart;
                             if (newTbDur < 0) newTbDur = 0;
                             lastRow.tb.s = newTbDur;
@@ -1774,26 +1749,10 @@
         // 保存データがない場合の初期化処理
         if (!loadState()) {
             startTcInput.value = "00:58:15";
-            rowsData = [];
-            
-            // 1行目: CB (1分30秒)
-            rowsData.push({
-                id: Date.now() + Math.random(),
-                content: "CB",
-                h: 0, m: 1, s: 30,
-                tb: { enabled: false, s: 10 },
-                barEnabled: false 
-            });
-
-            // 2行目: クレジット (15秒)
-            rowsData.push({
-                id: Date.now() + Math.random() + 1,
-                content: "クレジット",
-                h: 0, m: 0, s: 15,
-                tb: { enabled: false, s: 10 },
-                barEnabled: false 
-            });
-
+            rowsData = [
+                createRow("CB", 0, 1, 30),
+                createRow("クレジット", 0, 0, 15)
+            ];
             renderAll();
             saveState();
         }
@@ -1802,30 +1761,13 @@
         resetBtn.addEventListener('click', () => {
             if(confirm("全てリセットしますか？")) {
                 localStorage.removeItem(STORAGE_KEY);
-                // 配列を空にする
-                rowsData = [];
-                // 開始TCを 00:58:15 に設定
+                // 配列を初期化（ここでもcreateRowを使う）
                 startTcInput.value = "00:58:15"; 
                 titleInput.value = "";
-                
-                // 1行目: CB (1分30秒)
-                rowsData.push({
-                    id: Date.now() + Math.random(),
-                    content: "CB",
-                    h: 0, m: 1, s: 30,
-                    tb: { enabled: false, s: 10 },
-                    barEnabled: false 
-                });
-
-                // 2行目: クレジット (15秒)
-                rowsData.push({
-                    id: Date.now() + Math.random() + 1,
-                    content: "クレジット",
-                    h: 0, m: 0, s: 15,
-                    tb: { enabled: false, s: 10 },
-                    barEnabled: false 
-                });
-
+                rowsData = [
+                    createRow("CB", 0, 1, 30),
+                    createRow("クレジット", 0, 0, 15)
+                ];
                 renderAll();
                 saveState();
             }
@@ -1861,6 +1803,9 @@
                 renderAll();
             }
         });
+
+        // ★追加: デリゲーションイベントの初期化
+        setupDelegatedEvents();
     }
     </script>
 </body>
