@@ -1332,14 +1332,15 @@
 
         // --- データ構造定義（新規追加） ---
         // 行データの初期値生成ファクトリ：常に完全なオブジェクトを返します
-        function createRow(content = "", h = 0, m = 0, s = 0) {
+        // ★第5引数 barEnabled を追加 (デフォルトは true)
+        function createRow(content = "", h = 0, m = 0, s = 0, barEnabled = true) {
             return {
                 id: Date.now() + Math.random(),
                 content: content,
                 h: h, m: m, s: s,
                 // tbは常にオブジェクトとして存在させ、中身も初期化する
                 tb: { enabled: false, s: 10, offset: 0 }, 
-                barEnabled: true
+                barEnabled: barEnabled
             };
         }
 
@@ -1750,8 +1751,8 @@
         if (!loadState()) {
             startTcInput.value = "00:58:15";
             rowsData = [
-                createRow("CB", 0, 1, 30),
-                createRow("クレジット", 0, 0, 15)
+                createRow("CB", 0, 1, 30, false), // ★第5引数に false (帯OFF) を指定
+                createRow("クレジット", 0, 0, 15, false) // ★第5引数に false (帯OFF) を指定
             ];
             renderAll();
             saveState();
@@ -1761,12 +1762,12 @@
         resetBtn.addEventListener('click', () => {
             if(confirm("全てリセットしますか？")) {
                 localStorage.removeItem(STORAGE_KEY);
-                // 配列を初期化（ここでもcreateRowを使う）
+                // 配列を初期化
                 startTcInput.value = "00:58:15"; 
                 titleInput.value = "";
                 rowsData = [
-                    createRow("CB", 0, 1, 30),
-                    createRow("クレジット", 0, 0, 15)
+                    createRow("CB", 0, 1, 30, false), // ★第5引数に false (帯OFF) を指定
+                    createRow("クレジット", 0, 0, 15, false) // ★第5引数に false (帯OFF) を指定
                 ];
                 renderAll();
                 saveState();
