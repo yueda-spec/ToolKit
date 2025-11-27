@@ -1051,6 +1051,7 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
         // --- 汎用要素の取得 ---
@@ -1522,6 +1523,11 @@
                                 <input type="text" class="content-input" value="${row.content}" placeholder="内容 (R1, CM...)">
                             </div>
                             <div class="row-controls">
+                                 <span class="drag-handle text-gray-400 hover:text-gray-600 cursor-grab mr-2 pt-1" title="並び替え">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16" />
+                                    </svg>
+                                 </span>
                                  <button class="delete-btn p-1 bg-red-100 dark:bg-red-900 rounded text-red-500 hover:text-red-700">🗑 削除</button>
                                  <button class="toggle-bar-btn ${row.barEnabled ? 'active' : 'inactive'}">
                                     ${row.barEnabled ? '❚ 帯ON' : '❚ 帯OFF'}
@@ -1838,6 +1844,23 @@
         startTcInput.addEventListener('keydown', (e) => { if(e.key==='Enter') startTcInput.blur(); });
         titleInput.addEventListener('input', () => { saveState(); });
         printBtn.addEventListener('click', () => { updatePrintHeader(); window.print(); });
+
+        // ▼ ドラッグ並び替え（SortableJS）導入
+        const ladderContainer = document.getElementById("ladder-rows-container");
+        new Sortable(ladderContainer, {
+            animation: 150,
+            handle: ".drag-handle", // ハンドル部分でのみドラッグ可能にする
+            ghostClass: "dragging", // ドラッグ中のクラス（CSSでスタイル定義済み）
+            onEnd: (evt) => {
+                // 配列 rowsData の順番を入れ替える
+                const moved = rowsData.splice(evt.oldIndex, 1)[0];
+                rowsData.splice(evt.newIndex, 0, moved);
+                
+                // 保存して再描画（これで時刻計算などが追従します）
+                saveState();
+                renderAll();
+            }
+        });
     }
     </script>
 </body>
