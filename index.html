@@ -959,8 +959,17 @@
         </div>
         
         <footer class="mt-auto pt-12 pb-6 flex justify-center opacity-80 hover:opacity-100 transition-opacity">
-           <img src="https://i.imgur.com/5rKpGlp.png" alt="Company Logo" style="width: 120px; display: block;">
+           <img id="companyLogo" alt="Company Logo" style="width: 120px; display: block;">
         </footer>
+        <script>
+            fetch('logo.txt')
+                .then(response => response.text())
+                .then(data => {
+                    const img = document.getElementById('companyLogo');
+                    if(img) img.src = data;
+                })
+                .catch(error => console.error('Logo loading failed:', error));
+        </script>
 
     </div>
 
